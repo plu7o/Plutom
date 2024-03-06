@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "pluto_script"
+name = "plutom"
 version = "0.1.0"

@@ -1,21 +1,20 @@
-use std::{rc::Rc, usize};
-
 use crate::{
     chunk::{Chunk, OpCode},
+    compiler::Parser,
     debug::disassemble_instruction,
+    lexer::Lexer,
     value::{print_value, Value},
+    DEBUG_TRACE_EXECUTION,
 };
 
-const DEBUG_TRACE_EXECUTION: bool = true;
-
 pub enum InterpretResult<T> {
-    InterpretOk(T),
-    // InterpretCompileErr(T),
-    // InterpretRuntimeErr(T),
+    Ok(T),
+    CompileErr(T),
+    RuntimeErr(T),
 }
 
 pub struct VM {
-    chunk: Rc<Chunk>,
+    chunk: Box<Chunk>,
     ip: usize,
     stack: Vec<Value>,
     stack_top: isize,
@@ -24,7 +23,7 @@ pub struct VM {
 impl VM {
     pub fn new() -> Self {
         Self {
-            chunk: Rc::new(Chunk::init()),
+            chunk: Box::new(Chunk::init()),
             ip: 0,
             stack: Vec::new(),
             stack_top: -1,
@@ -37,9 +36,18 @@ impl VM {
         vm
     }
 
-    pub fn interpret(&mut self, chunk: Rc<Chunk>) -> InterpretResult<()> {
-        self.chunk = chunk;
+    pub fn interpret(&mut self, source: &str) -> InterpretResult<()> {
+        let mut chunk = Chunk::init();
+        let lexer = Lexer::init(source);
+        let mut compiler = Parser::init(lexer, &mut chunk);
+
+        if !compiler.compile() {
+            return InterpretResult::CompileErr(());
+        }
+
+        self.chunk = Box::new(chunk);
         self.ip = 0;
+
         self.run()
     }
 
@@ -79,16 +87,14 @@ impl VM {
 
         loop {
             if DEBUG_TRACE_EXECUTION {
-                print!("{:36}", "");
                 for slot in self.stack.iter() {
                     print!("[ ");
                     print_value(&slot);
                     print!(" ]");
                 }
                 println!();
-                disassemble_instruction(&self.chunk, self.ip);
+                // disassemble_instruction(&self.chunk, self.ip);
             }
-            println!("{}", self.stack_top);
             let instruction = self.read_chunk();
             match OpCode::from(instruction) {
                 OpCode::ADD => binary_op!(+),
@@ -107,7 +113,7 @@ impl VM {
                 OpCode::RETURN => {
                     print_value(&self.pop());
                     println!();
-                    return InterpretResult::InterpretOk(());
+                    return InterpretResult::Ok(());
                 }
             }
         }

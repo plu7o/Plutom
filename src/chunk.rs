@@ -71,7 +71,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_from_bytes() {
+    fn test_opcode_from_bytes() {
         let tests = vec![0, 1, 2];
         for test in tests.iter() {
             match OpCode::from(*test) {

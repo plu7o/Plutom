@@ -3,14 +3,14 @@ use crate::{
     value::print_value,
 };
 
-// pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
-//     println!("== {} ==", name);
-//     // (1..chunk.code.len()).fold(0, |offset, _| disassemble_instruction(chunk, offset));
-//     let mut offset = 0;
-//     while offset < chunk.code.len() {
-//         offset = disassemble_instruction(chunk, offset);
-//     }
-// }
+pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
+    println!("== {} ==", name);
+    // (1..chunk.code.len()).fold(0, |offset, _| disassemble_instruction(chunk, offset));
+    let mut offset = 0;
+    while offset < chunk.code.len() {
+        offset = disassemble_instruction(chunk, offset);
+    }
+}
 
 pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     print!("[{:04}] -> ", offset);

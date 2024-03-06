@@ -1,37 +1,78 @@
 mod chunk;
+mod compiler;
 mod debug;
+mod lexer;
 mod value;
 mod vm;
 
-use std::rc::Rc;
+use std::env;
+use std::fs;
+use std::io;
+use std::io::Read;
+use std::io::Write;
+use std::process;
 
-use chunk::Chunk;
-use chunk::OpCode;
-use vm::VM;
+use vm::InterpretResult;
+
+const DEBUG_PRINT_CODE: bool = true;
+const DEBUG_TRACE_EXECUTION: bool = true;
 
 fn main() {
-    let mut vm = VM::init();
-    let mut chunk: Chunk = Chunk::init();
+    let args: Vec<String> = env::args().collect();
+    match args.len() {
+        1 => repl(),
+        2 => run_file(&args[1]),
+        _ => {
+            println!("Usage Plutom");
+            process::exit(64);
+        }
+    }
+}
 
-    let constant = chunk.add_const(1.2);
-    chunk.write(OpCode::CONST as usize, 1);
-    chunk.write(constant, 1);
+fn repl() {
+    let mut vm = vm::VM::init();
 
-    let constant = chunk.add_const(3.4);
-    chunk.write(OpCode::CONST as usize, 1);
-    chunk.write(constant, 1);
+    const PROMPT: &str = "PlutomV0.01>> ";
+    let mut input = String::new();
+    loop {
+        print!("{}", PROMPT);
+        io::stdout().flush().unwrap();
 
-    chunk.write(OpCode::ADD as usize, 1);
+        io::stdin()
+            .read_line(&mut input)
+            .expect("InputError: Failed reading input.");
+        vm.interpret(&input.trim());
+        input.clear();
+    }
+}
 
-    let constant = chunk.add_const(5.6);
-    chunk.write(OpCode::CONST as usize, 1);
-    chunk.write(constant, 1);
+fn run_file(path: &str) {
+    let source = match read_file(path) {
+        Ok(source) => source,
+        Err(err) => {
+            println!("FileError: {}.", err);
+            process::exit(74);
+        }
+    };
 
-    chunk.write(OpCode::DIVIDE as usize, 1);
+    let mut vm = vm::VM::init();
+    let result = vm.interpret(&source);
+    match result {
+        InterpretResult::CompileErr(msg) => {
+            println!("CompileError: {:?}.", msg);
+            process::exit(65)
+        }
+        InterpretResult::RuntimeErr(msg) => {
+            println!("RuntimeError: {:?}.", msg);
+            process::exit(70)
+        }
+        _ => (),
+    }
+}
 
-    chunk.write(OpCode::NEGATE as usize, 1);
-    chunk.write(OpCode::RETURN as usize, 1);
-
-    // debug::disassemble_chunk(&chunk, "test chunk");
-    vm.interpret(Rc::new(chunk));
+fn read_file(path: &str) -> Result<String, std::io::Error> {
+    let mut file = fs::File::open(path)?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf)?;
+    Ok(buf)
 }
