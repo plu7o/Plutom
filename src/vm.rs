@@ -3,7 +3,7 @@ use crate::{
     compiler::Parser,
     debug::disassemble_instruction,
     lexer::Lexer,
-    value::{print_value, Value},
+    value::{print_value, values_equal, Value},
     DEBUG_TRACE_EXECUTION,
 };
 
@@ -51,6 +51,77 @@ impl VM {
         self.run()
     }
 
+    #[rustfmt::skip]
+    fn run(&mut self) -> InterpretResult<()> {
+        macro_rules! binary_op {
+            ($val_type:expr, $op:tt) => {{
+                if !self.peek(0).is_number() || !self.peek(1).is_number() {
+                    self.runtime_error("Operands must be numbers.");
+                    return InterpretResult::RuntimeErr(());
+                }
+                let b = self.pop().as_number().unwrap();
+                let a = self.pop().as_number().unwrap();
+                self.push($val_type(a $op b));
+            }};
+        }
+
+        loop {
+            if DEBUG_TRACE_EXECUTION {
+                for slot in self.stack.iter() {
+                    print!("[ ");
+                    print_value(&slot);
+                    print!(" ]");
+                }
+                println!();
+                disassemble_instruction(&self.chunk, self.ip);
+            }
+            let instruction = self.read_chunk();
+            match OpCode::from(instruction) {
+                OpCode::ADD         => binary_op!(Value::number_val, +),
+                OpCode::SUBSTRACT   => binary_op!(Value::number_val, -),
+                OpCode::MULTIPLY    => binary_op!(Value::number_val, *),
+                OpCode::DIVIDE      => binary_op!(Value::number_val, /),
+                OpCode::GREATER     => binary_op!(Value::bool_val, >),
+                OpCode::LESS        => binary_op!(Value::bool_val, <),
+                OpCode::NONE        => self.push(Value::none_val()),
+                OpCode::TRUE        => self.push(Value::bool_val(true)),
+                OpCode::FALSE       => self.push(Value::bool_val(false)),
+                
+                OpCode::NOT => {
+                    let value = self.pop();
+                    self.push(Value::bool_val(self.is_falsy(value)));
+                }
+                OpCode::EQUAL => {
+                    let a: Value = self.pop();
+                    let b: Value = self.pop();
+                    self.push(Value::bool_val(values_equal(a, b)))
+                }
+
+                OpCode::CONST => {
+                    let constant: Value = self.read_constant();
+                    self.push(constant);
+                }
+                OpCode::NEGATE => {
+                    if !self.peek(0).is_number() {
+                        self.runtime_error("Operand must be a number.");
+                        return InterpretResult::RuntimeErr(());
+                    }
+                    let value = -self.pop().as_number().unwrap();
+                    self.push(Value::number_val(value));
+                }
+                OpCode::RETURN => {
+                    print_value(&self.pop());
+                    println!();
+                    return InterpretResult::Ok(());
+                }
+            }
+        }
+    }
+
+    fn is_falsy(&self, value: Value) -> bool {
+        value.is_none() || (value.is_bool() && !value.as_bool().unwrap())
+    }
+
     fn push(&mut self, value: Value) {
         self.stack.push(value);
         self.stack_top += 1;
@@ -58,7 +129,11 @@ impl VM {
 
     fn pop(&mut self) -> Value {
         self.stack_top -= 1;
-        self.stack.pop().unwrap_or(0.0)
+        self.stack.pop().unwrap()
+    }
+
+    fn peek(&self, distance: usize) -> Value {
+        self.stack[self.stack_top as usize - distance]
     }
 
     fn reset_stack(&mut self) {
@@ -76,46 +151,11 @@ impl VM {
         self.chunk.constants[chunk]
     }
 
-    fn run(&mut self) -> InterpretResult<()> {
-        macro_rules! binary_op {
-            ($op:tt) => {{
-                let b = self.pop();
-                let a = self.pop();
-                self.push(a $op b);
-            }};
-        }
-
-        loop {
-            if DEBUG_TRACE_EXECUTION {
-                for slot in self.stack.iter() {
-                    print!("[ ");
-                    print_value(&slot);
-                    print!(" ]");
-                }
-                println!();
-                // disassemble_instruction(&self.chunk, self.ip);
-            }
-            let instruction = self.read_chunk();
-            match OpCode::from(instruction) {
-                OpCode::ADD => binary_op!(+),
-                OpCode::SUBSTRACT => binary_op!(-),
-                OpCode::MULTIPLY => binary_op!(*),
-                OpCode::DIVIDE => binary_op!(/),
-
-                OpCode::CONST => {
-                    let constant: Value = self.read_constant();
-                    self.push(constant);
-                }
-                OpCode::NEGATE => {
-                    let constant = self.stack[self.stack_top as usize];
-                    self.stack[self.stack_top as usize] = -constant;
-                }
-                OpCode::RETURN => {
-                    print_value(&self.pop());
-                    println!();
-                    return InterpretResult::Ok(());
-                }
-            }
-        }
+    fn runtime_error(&mut self, format: &str) {
+        println!("{}", format);
+        let instruction = self.ip - self.chunk.code.len() - 1;
+        let line = self.chunk.get_line(instruction);
+        println!("[Line {}] in script\n", line);
+        self.reset_stack();
     }
 }

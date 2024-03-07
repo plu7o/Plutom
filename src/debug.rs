@@ -12,6 +12,7 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     }
 }
 
+#[rustfmt::skip]
 pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     print!("[{:04}] -> ", offset);
     if offset > 0 && chunk.get_line(offset) == chunk.get_line(offset - 1) {
@@ -22,13 +23,20 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
 
     let instruction = chunk.code[offset];
     match OpCode::from(instruction) {
-        OpCode::RETURN => simple_op("RETURN", offset),
-        OpCode::CONST => constant_op("CONST", &chunk, offset),
-        OpCode::NEGATE => simple_op("NEGATE", offset),
-        OpCode::ADD => simple_op("ADD", offset),
-        OpCode::SUBSTRACT => simple_op("SUBSTRACT", offset),
-        OpCode::MULTIPLY => simple_op("MULTIPLY", offset),
-        OpCode::DIVIDE => simple_op("DIVIDE", offset),
+        OpCode::CONST       => constant_op("CONST", &chunk, offset),
+        OpCode::RETURN      => simple_op("RETURN", offset),
+        OpCode::NEGATE      => simple_op("NEGATE", offset),
+        OpCode::ADD         => simple_op("ADD", offset),
+        OpCode::SUBSTRACT   => simple_op("SUBSTRACT", offset),
+        OpCode::MULTIPLY    => simple_op("MULTIPLY", offset),
+        OpCode::DIVIDE      => simple_op("DIVIDE", offset),
+        OpCode::NONE        => simple_op("NONE", offset),
+        OpCode::TRUE        => simple_op("TRUE", offset),
+        OpCode::FALSE       => simple_op("FALSE", offset),
+        OpCode::NOT         => simple_op("NOT", offset),
+        OpCode::EQUAL       => simple_op("EQUAL", offset),
+        OpCode::GREATER     => simple_op("GREATER", offset),
+        OpCode::LESS        => simple_op("LESS", offset),
     }
 }
 

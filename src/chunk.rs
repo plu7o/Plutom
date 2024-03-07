@@ -13,6 +13,13 @@ pub enum OpCode {
     SUBSTRACT,
     MULTIPLY,
     DIVIDE,
+    NONE,
+    TRUE,
+    FALSE,
+    NOT,
+    EQUAL,
+    GREATER,
+    LESS,
 }
 
 impl From<usize> for OpCode {
@@ -25,6 +32,13 @@ impl From<usize> for OpCode {
             4 => OpCode::SUBSTRACT,
             5 => OpCode::MULTIPLY,
             6 => OpCode::DIVIDE,
+            7 => OpCode::NONE,
+            8 => OpCode::TRUE,
+            9 => OpCode::FALSE,
+            10 => OpCode::NOT,
+            11 => OpCode::EQUAL,
+            12 => OpCode::GREATER,
+            13 => OpCode::LESS,
             _ => panic!("Unkown OpCode"),
         }
     }
@@ -72,7 +86,7 @@ mod tests {
 
     #[test]
     fn test_opcode_from_bytes() {
-        let tests = vec![0, 1, 2];
+        let tests = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         for test in tests.iter() {
             match OpCode::from(*test) {
                 OpCode::RETURN => {
@@ -95,6 +109,27 @@ mod tests {
                 }
                 OpCode::DIVIDE => {
                     assert_eq!(*test, 6)
+                }
+                OpCode::NONE => {
+                    assert_eq!(*test, 7)
+                }
+                OpCode::TRUE => {
+                    assert_eq!(*test, 8)
+                }
+                OpCode::FALSE => {
+                    assert_eq!(*test, 9)
+                }
+                OpCode::NOT => {
+                    assert_eq!(*test, 10)
+                }
+                OpCode::EQUAL => {
+                    assert_eq!(*test, 11)
+                }
+                OpCode::GREATER => {
+                    assert_eq!(*test, 12)
+                }
+                OpCode::LESS => {
+                    assert_eq!(*test, 13)
                 }
             }
         }
