@@ -1,28 +1,27 @@
-#[derive(Debug, Clone, Copy, PartialEq)]
+use core::panic;
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
     Bool(bool),
     Number(f64),
-    Object(Obj),
+    Object(ObjType),
     None,
 }
-#[derive(Debug, Clone, Copy)]
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ObjType {
+    String(ObjString),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjString {
+    pub len: usize,
+    pub chars: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct Value {
     _type: ValueType,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ObjType {
-    String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Obj {
-    _type: ObjType,
-}
-
-struct ObjString {
-    _type: ObjType,
-    string: String,
 }
 
 impl Value {
@@ -40,14 +39,15 @@ impl Value {
             _ => false,
         }
     }
+
     pub fn bool_val(value: bool) -> Value {
         Value::new(ValueType::Bool(value))
     }
 
-    pub fn as_bool(&self) -> Option<bool> {
+    pub fn as_bool(&self) -> bool {
         match self._type {
-            ValueType::Bool(value) => Some(value),
-            _ => None,
+            ValueType::Bool(value) => value,
+            _ => panic!("ValueError: {:?} is not a boolean", self._type),
         }
     }
 
@@ -62,10 +62,10 @@ impl Value {
         Value::new(ValueType::Number(value))
     }
 
-    pub fn as_number(&self) -> Option<f64> {
+    pub fn as_number(&self) -> f64 {
         match self._type {
-            ValueType::Number(value) => Some(value),
-            _ => None,
+            ValueType::Number(value) => value,
+            _ => panic!("ValueError: {:?} is not a number", self._type),
         }
     }
 
@@ -76,48 +76,139 @@ impl Value {
         }
     }
 
-    pub fn obj_val(object: Obj) -> Value {
-        Value::new(ValueType::Object(object))
-    }
-
-    pub fn as_obj(&self) -> Option<Obj> {
-        match self._type {
-            ValueType::Object(Obj) => Some(Obj),
-            _ => None,
+    pub fn as_string(&self) -> &ObjString {
+        match self.as_obj() {
+            ObjType::String(string) => string,
+            // _ => panic!("{:?} is not a string", self._type),
         }
     }
 
-    pub fn is_obj(&self) -> bool {
+    pub fn is_string(&self) -> bool {
+        match &self._type {
+            ValueType::Object(obj) => self.is_obj_type(&obj),
+            _ => false,
+        }
+    }
+
+    pub fn obj_val(object: ObjType) -> Value {
+        Value::new(ValueType::Object(object))
+    }
+
+    pub fn as_obj(&self) -> &ObjType {
+        match &self._type {
+            ValueType::Object(obj) => obj,
+            _ => panic!("ValueError: {:?} is not a object", self._type),
+        }
+    }
+
+    fn is_obj(&self) -> bool {
         match self._type {
             ValueType::Object(_) => true,
             _ => false,
         }
     }
-}
 
-pub fn values_equal(a: Value, b: Value) -> bool {
-    if a._type != b._type {
-        return false;
+    fn is_obj_type(&self, _type: &ObjType) -> bool {
+        self.is_obj() && self.as_obj() == _type
     }
-    match a._type {
-        ValueType::Bool(a) => a == b.as_bool().unwrap(),
-        ValueType::Number(a) => a == b.as_number().unwrap(),
-        ValueType::None => true,
-        _ => false,
-    }
-}
 
-pub fn print_value(value: &Value) {
-    match value._type {
-        ValueType::Bool(value) => {
-            if value {
-                print!("true")
-            } else {
-                print!("false")
+    pub fn print(&self) {
+        match &self._type {
+            ValueType::Bool(value) => {
+                if *value {
+                    print!("true")
+                } else {
+                    print!("false")
+                }
             }
+            ValueType::Number(value) => print!("{}", value),
+            ValueType::Object(obj) => match obj {
+                ObjType::String(string) => print!("{}", string.chars),
+            },
+            ValueType::None => print!("none"),
         }
-        ValueType::Number(value) => print!("{}", value),
-        ValueType::None => print!("none"),
-        _ => (),
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        if self._type != other._type {
+            return false;
+        }
+        match &self._type {
+            ValueType::Bool(a) => *a == other.as_bool(),
+            ValueType::Number(a) => *a == other.as_number(),
+            ValueType::Object(obj) => match obj {
+                ObjType::String(a_string) => {
+                    let b_string = other.as_string();
+                    a_string.len == b_string.len && a_string.chars == b_string.chars
+                }
+            },
+            ValueType::None => true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_string() {
+        let _tests = vec![
+            Value::obj_val(ObjType::String(ObjString {
+                len: 0,
+                chars: String::new(),
+            })),
+            Value::obj_val(ObjType::String(ObjString {
+                len: 0,
+                chars: "mojdfjdnf".to_string(),
+            })),
+            Value::number_val(1.2),
+            Value::bool_val(true),
+            Value::none_val(),
+        ];
+
+        assert_eq!(_tests[0].is_string(), true);
+        assert_eq!(_tests[1].is_string(), true);
+        assert_eq!(_tests[2].is_string(), false);
+        assert_eq!(_tests[3].is_string(), false);
+        assert_eq!(_tests[4].is_string(), false);
+    }
+
+    #[test]
+    fn test_is_obj_type() {
+        let _tests = vec![Value::obj_val(ObjType::String(ObjString {
+            len: 0,
+            chars: String::new(),
+        }))];
+
+        for test in _tests {
+            assert_eq!(
+                test.is_obj_type(&ObjType::String(ObjString {
+                    len: 0,
+                    chars: String::new(),
+                })),
+                true
+            )
+        }
+    }
+
+    #[test]
+    fn test_is_obj() {
+        let _tests = vec![
+            Value::obj_val(ObjType::String(ObjString {
+                len: 0,
+                chars: String::new(),
+            })),
+            Value::number_val(1.2),
+            Value::bool_val(true),
+            Value::none_val(),
+        ];
+
+        assert_eq!(_tests[0].is_obj(), true);
+        assert_eq!(_tests[1].is_obj(), false);
+        assert_eq!(_tests[2].is_obj(), false);
+        assert_eq!(_tests[3].is_obj(), false);
     }
 }

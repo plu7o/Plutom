@@ -1,7 +1,4 @@
-use crate::{
-    chunk::{Chunk, OpCode},
-    value::print_value,
-};
+use crate::chunk::{Chunk, OpCode};
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     println!("== {} ==", name);
@@ -48,7 +45,7 @@ fn simple_op(name: &str, offset: usize) -> usize {
 fn constant_op(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let idx = chunk.code[offset + 1];
     print!("{:8} [{}] ", name, idx);
-    print_value(&chunk.constants[idx]);
+    chunk.constants[idx].print();
     println!();
     offset + 2
 }

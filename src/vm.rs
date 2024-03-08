@@ -1,16 +1,16 @@
 use crate::{
     chunk::{Chunk, OpCode},
-    compiler::Parser,
+    compiler::Compiler,
     debug::disassemble_instruction,
     lexer::Lexer,
-    value::{print_value, values_equal, Value},
+    value::{ObjString, ObjType, Value},
     DEBUG_TRACE_EXECUTION,
 };
 
-pub enum InterpretResult<T> {
+pub enum InterpretResult<T, E> {
     Ok(T),
-    CompileErr(T),
-    RuntimeErr(T),
+    CompileErr(E),
+    RuntimeErr(E),
 }
 
 pub struct VM {
@@ -36,31 +36,30 @@ impl VM {
         vm
     }
 
-    pub fn interpret(&mut self, source: &str) -> InterpretResult<()> {
-        let mut chunk = Chunk::init();
+    pub fn interpret(&mut self, source: &str) -> InterpretResult<(), &str> {
         let lexer = Lexer::init(source);
-        let mut compiler = Parser::init(lexer, &mut chunk);
+        let mut chunk = Chunk::init();
+        let mut compiler = Compiler::init(lexer, &mut chunk);
 
         if !compiler.compile() {
-            return InterpretResult::CompileErr(());
+            return InterpretResult::CompileErr("CompileError: Fatal");
         }
 
         self.chunk = Box::new(chunk);
         self.ip = 0;
-
         self.run()
     }
 
     #[rustfmt::skip]
-    fn run(&mut self) -> InterpretResult<()> {
+    fn run(&mut self) -> InterpretResult<(), &str> {
         macro_rules! binary_op {
             ($val_type:expr, $op:tt) => {{
                 if !self.peek(0).is_number() || !self.peek(1).is_number() {
                     self.runtime_error("Operands must be numbers.");
-                    return InterpretResult::RuntimeErr(());
+                    return InterpretResult::RuntimeErr("Operands must be numbers.");
                 }
-                let b = self.pop().as_number().unwrap();
-                let a = self.pop().as_number().unwrap();
+                let b = self.pop().as_number();
+                let a = self.pop().as_number();
                 self.push($val_type(a $op b));
             }};
         }
@@ -69,7 +68,7 @@ impl VM {
             if DEBUG_TRACE_EXECUTION {
                 for slot in self.stack.iter() {
                     print!("[ ");
-                    print_value(&slot);
+                    slot.print();
                     print!(" ]");
                 }
                 println!();
@@ -77,7 +76,19 @@ impl VM {
             }
             let instruction = self.read_chunk();
             match OpCode::from(instruction) {
-                OpCode::ADD         => binary_op!(Value::number_val, +),
+                OpCode::ADD => {
+                    if self.peek(0).is_string() && self.peek(1).is_string() {
+                        self.concatenate()
+                    } else if self.peek(0).is_number() && self.peek(1).is_number() {
+                        let a = self.pop().as_number();
+                        let b = self.pop().as_number();
+                        self.push(Value::number_val(a + b))
+                        
+                    } else {
+                        self.runtime_error(&format!("Operands must be two numbers or two strings"));
+                        return InterpretResult::RuntimeErr("Operands must be two numbers or two strings");
+                    }
+                },
                 OpCode::SUBSTRACT   => binary_op!(Value::number_val, -),
                 OpCode::MULTIPLY    => binary_op!(Value::number_val, *),
                 OpCode::DIVIDE      => binary_op!(Value::number_val, /),
@@ -86,7 +97,6 @@ impl VM {
                 OpCode::NONE        => self.push(Value::none_val()),
                 OpCode::TRUE        => self.push(Value::bool_val(true)),
                 OpCode::FALSE       => self.push(Value::bool_val(false)),
-                
                 OpCode::NOT => {
                     let value = self.pop();
                     self.push(Value::bool_val(self.is_falsy(value)));
@@ -94,7 +104,7 @@ impl VM {
                 OpCode::EQUAL => {
                     let a: Value = self.pop();
                     let b: Value = self.pop();
-                    self.push(Value::bool_val(values_equal(a, b)))
+                    self.push(Value::bool_val(a == b))
                 }
 
                 OpCode::CONST => {
@@ -104,13 +114,13 @@ impl VM {
                 OpCode::NEGATE => {
                     if !self.peek(0).is_number() {
                         self.runtime_error("Operand must be a number.");
-                        return InterpretResult::RuntimeErr(());
+                        return InterpretResult::RuntimeErr("Operand must be a number.");
                     }
-                    let value = -self.pop().as_number().unwrap();
+                    let value = -self.pop().as_number();
                     self.push(Value::number_val(value));
                 }
                 OpCode::RETURN => {
-                    print_value(&self.pop());
+                    self.pop().print();
                     println!();
                     return InterpretResult::Ok(());
                 }
@@ -118,8 +128,30 @@ impl VM {
         }
     }
 
+    fn concatenate(&mut self) {
+        let a = self.pop();
+        let b = self.pop();
+        let a_string = &a.as_string();
+        let b_string = &b.as_string();
+        let mut chars = String::new();
+        chars.push_str(&a_string.chars);
+        chars.push_str(&b_string.chars);
+        let length = a_string.len + b_string.len;
+        
+        self.push(
+            Value::obj_val(
+                ObjType::String(
+                    ObjString {
+                        len: length.to_owned(),
+                        chars,
+                     }
+                )
+            )
+        );
+    }
+
     fn is_falsy(&self, value: Value) -> bool {
-        value.is_none() || (value.is_bool() && !value.as_bool().unwrap())
+        value.is_none() || (value.is_bool() && !value.as_bool())
     }
 
     fn push(&mut self, value: Value) {
@@ -132,8 +164,8 @@ impl VM {
         self.stack.pop().unwrap()
     }
 
-    fn peek(&self, distance: usize) -> Value {
-        self.stack[self.stack_top as usize - distance]
+    fn peek(&self, distance: usize) -> &Value {
+        &self.stack[self.stack_top as usize - distance]
     }
 
     fn reset_stack(&mut self) {
@@ -148,7 +180,7 @@ impl VM {
 
     fn read_constant(&mut self) -> Value {
         let chunk = self.read_chunk();
-        self.chunk.constants[chunk]
+        self.chunk.constants[chunk].clone()
     }
 
     fn runtime_error(&mut self, format: &str) {

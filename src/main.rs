@@ -23,7 +23,7 @@ fn main() {
         1 => repl(),
         2 => run_file(&args[1]),
         _ => {
-            println!("Usage Plutom");
+            println!("Usage: plutom [script]");
             process::exit(64);
         }
     }
@@ -32,7 +32,7 @@ fn main() {
 fn repl() {
     let mut vm = vm::VM::init();
 
-    const PROMPT: &str = "PlutomV0.01>> ";
+    const PROMPT: &str = "PlutomV0.01 >> ";
     let mut input = String::new();
     loop {
         print!("{}", PROMPT);

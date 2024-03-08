@@ -99,18 +99,6 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn scan(&mut self) -> Vec<Token> {
-        let mut tokens = Vec::new();
-        loop {
-            let next = self.scan_token();
-            tokens.push(next);
-            if next._type == TokenType::Eof {
-                break;
-            }
-        }
-        tokens
-    }
-
     pub fn scan_token(&mut self) -> Token<'a> {
         self.skip_whitespace();
         self.start = self.current;

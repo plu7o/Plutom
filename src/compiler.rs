@@ -2,9 +2,9 @@ use std::usize;
 
 use crate::{
     chunk::{Chunk, OpCode},
-    debug::disassemble_chunk,
     lexer::{Lexer, Token, TokenType},
-    value::{Value, ValueType},
+    value::{ObjString, ObjType, Value, ValueType},
+    debug::disassemble_chunk,
     DEBUG_PRINT_CODE,
 };
 
@@ -28,6 +28,7 @@ enum ParseFn {
     Grouping,
     Unary,
     Number,
+    String,
     Literal,
 }
 
@@ -47,7 +48,7 @@ impl ParseRule {
     }
 }
 
-pub struct Parser<'a> {
+pub struct Compiler<'a> {
     current: Token<'a>,
     prev: Token<'a>,
     lexer: Lexer<'a>,
@@ -56,7 +57,7 @@ pub struct Parser<'a> {
     panic_mode: bool,
 }
 
-impl<'a> Parser<'a> {
+impl<'a> Compiler<'a> {
     pub fn init(lexer: Lexer<'a>, chunk: &'a mut Chunk) -> Self {
         Self {
             current: Token::default(),
@@ -105,6 +106,7 @@ impl<'a> Parser<'a> {
             ParseFn::Grouping => self.grouping(),
             ParseFn::Unary => self.unary(),
             ParseFn::Number => self.number(),
+            ParseFn::String => self.string(),
             ParseFn::Literal => self.literal(),
         }
     }
@@ -127,26 +129,26 @@ impl<'a> Parser<'a> {
             TokenType::Dollar       => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Bang         => ParseRule::new(Some(ParseFn::Unary), None, Precedence::NONE),
             TokenType::BangEQ       => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
-            TokenType::Eq           => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Eq           => ParseRule::new(None, None, Precedence::ASSIGNMENT),
             TokenType::EqEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
             TokenType::Gt           => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
             TokenType::GtEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
             TokenType::Lt           => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
             TokenType::LtEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
             TokenType::Ident        => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::String       => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::String       => ParseRule::new(Some(ParseFn::String), None, Precedence::NONE),
             TokenType::Number       => ParseRule::new(Some(ParseFn::Number), None, Precedence::NONE),
-            TokenType::And          => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::And          => ParseRule::new(None, None, Precedence::AND),
             TokenType::Class        => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Else         => ParseRule::new(None, None, Precedence::NONE),
             TokenType::False        => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
             TokenType::For          => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Fn           => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Fn           => ParseRule::new(None, None, Precedence::CALL),
             TokenType::If           => ParseRule::new(None, None, Precedence::NONE),
             TokenType::None         => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
-            TokenType::Or           => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Or           => ParseRule::new(None, None, Precedence::OR),
             TokenType::Echo         => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Return       => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Return       => ParseRule::new(None, None, Precedence::PRIMARY),
             TokenType::Super        => ParseRule::new(None, None, Precedence::NONE),
             TokenType::This         => ParseRule::new(None, None, Precedence::NONE),
             TokenType::True         => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
@@ -177,6 +179,11 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn grouping(&mut self) {
+        self.expression();
+        self.consume(TokenType::RightParen, "Expect ')' after expression.");
+    }
+
     fn unary(&mut self) {
         let op_type = self.prev._type;
 
@@ -196,6 +203,19 @@ impl<'a> Parser<'a> {
         self.emit_const(Value::new(ValueType::Number(value)));
     }
 
+    fn string(&mut self) {
+        self.emit_const(
+            Value::obj_val(
+                ObjType::String(
+                    ObjString { 
+                        chars: self.prev.literal.trim_start_matches("\"").trim_end_matches("\"").to_string().clone(), 
+                        len: self.prev.literal.len().clone(), 
+                    }
+                )
+            )
+        );
+    }
+
     fn literal(&mut self) {
         match self.prev._type {
             TokenType::False => self.emit_byte(OpCode::FALSE as usize),
@@ -203,15 +223,6 @@ impl<'a> Parser<'a> {
             TokenType::None => self.emit_byte(OpCode::NONE as usize),
             _ => (),
         };
-    }
-
-    fn string(&mut self) {
-        todo!()
-    }
-
-    fn grouping(&mut self) {
-        self.expression();
-        self.consume(TokenType::RightParen, "Expect ')' after expression.");
     }
 
     fn advance(&mut self) {
