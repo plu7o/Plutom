@@ -1,22 +1,13 @@
 use core::panic;
 
+use crate::object::{ObjString, ObjType};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
     Bool(bool),
     Number(f64),
     Object(ObjType),
     None,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ObjType {
-    String(ObjString),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ObjString {
-    pub len: usize,
-    pub chars: String,
 }
 
 #[derive(Debug, Clone)]
@@ -138,12 +129,7 @@ impl PartialEq for Value {
         match &self._type {
             ValueType::Bool(a) => *a == other.as_bool(),
             ValueType::Number(a) => *a == other.as_number(),
-            ValueType::Object(obj) => match obj {
-                ObjType::String(a_string) => {
-                    let b_string = other.as_string();
-                    a_string.len == b_string.len && a_string.chars == b_string.chars
-                }
-            },
+            ValueType::Object(a) => a == other.as_obj(),
             ValueType::None => true,
         }
     }
@@ -177,24 +163,6 @@ mod tests {
     }
 
     #[test]
-    fn test_is_obj_type() {
-        let _tests = vec![Value::obj_val(ObjType::String(ObjString {
-            len: 0,
-            chars: String::new(),
-        }))];
-
-        for test in _tests {
-            assert_eq!(
-                test.is_obj_type(&ObjType::String(ObjString {
-                    len: 0,
-                    chars: String::new(),
-                })),
-                true
-            )
-        }
-    }
-
-    #[test]
     fn test_is_obj() {
         let _tests = vec![
             Value::obj_val(ObjType::String(ObjString {
@@ -210,5 +178,29 @@ mod tests {
         assert_eq!(_tests[1].is_obj(), false);
         assert_eq!(_tests[2].is_obj(), false);
         assert_eq!(_tests[3].is_obj(), false);
+    }
+
+    #[test]
+    fn test_equality() {
+        let _tests = vec![
+            Value::obj_val(ObjType::String(ObjString {
+                len: 0,
+                chars: String::new(),
+            })),
+            Value::number_val(1.2),
+            Value::bool_val(true),
+            Value::none_val(),
+        ];
+
+        assert_ne!(
+            _tests[0],
+            Value::obj_val(ObjType::String(ObjString {
+                len: 0,
+                chars: "fdssdfsdfsdf".to_owned(),
+            }))
+        );
+        assert_eq!(_tests[1], Value::number_val(1.2));
+        assert_eq!(_tests[2], Value::bool_val(true));
+        assert_eq!(_tests[3], Value::none_val());
     }
 }

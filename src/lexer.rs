@@ -54,7 +54,7 @@ pub enum TokenType {
     Eof,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Token<'a> {
     pub _type: TokenType,
     pub literal: &'a str,
@@ -164,7 +164,7 @@ impl<'a> Lexer<'a> {
                 };
                 self.make_token(token)
             }
-            _ => self.error_token("Usexpected character."),
+            _ => self.error_token("Unexpected character."),
         }
     }
 
@@ -220,7 +220,7 @@ impl<'a> Lexer<'a> {
         loop {
             let c = self.peek();
             match c {
-                ' ' | '\r' | '\t' => {
+                ' ' | '\r' | '\t' | '\n' => {
                     self.advance();
                 }
                 '/' => {

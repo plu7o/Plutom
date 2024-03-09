@@ -1,6 +1,3 @@
-use core::panic;
-use std::usize;
-
 use crate::value::Value;
 
 #[derive(Debug)]
@@ -20,6 +17,15 @@ pub enum OpCode {
     EQUAL,
     GREATER,
     LESS,
+    ECHO,
+    POP,
+    DefineGlobal,
+    GetGlobal,
+    SetGlobal,
+    GetLocal,
+    SetLocal,
+    JumpIfFalse,
+    Jump,
 }
 
 impl From<usize> for OpCode {
@@ -39,6 +45,15 @@ impl From<usize> for OpCode {
             11 => OpCode::EQUAL,
             12 => OpCode::GREATER,
             13 => OpCode::LESS,
+            14 => OpCode::ECHO,
+            15 => OpCode::POP,
+            16 => OpCode::DefineGlobal,
+            17 => OpCode::GetGlobal,
+            18 => OpCode::SetGlobal,
+            19 => OpCode::GetLocal,
+            20 => OpCode::SetGlobal,
+            21 => OpCode::JumpIfFalse,
+            22 => OpCode::Jump,
             _ => panic!("Unkown OpCode"),
         }
     }
@@ -71,8 +86,8 @@ impl Chunk {
     }
 
     pub fn get_line(&self, index: usize) -> usize {
-        let chunk: Vec<&str> = self.lines_rle.split(",").collect();
-        let line = chunk[index];
+        let chunks: Vec<&str> = self.lines_rle.split(",").collect();
+        let line = chunks[index];
         let line_num: usize = line[line.len() - 1..]
             .parse()
             .expect("Wrong REF formatting");
@@ -86,50 +101,76 @@ mod tests {
 
     #[test]
     fn test_opcode_from_bytes() {
-        let tests = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        for test in tests.iter() {
-            match OpCode::from(*test) {
+        for test in 0..20 {
+            match OpCode::from(test) {
                 OpCode::RETURN => {
-                    assert_eq!(*test, 0)
+                    assert_eq!(test, 0)
                 }
                 OpCode::CONST => {
-                    assert_eq!(*test, 1)
+                    assert_eq!(test, 1)
                 }
                 OpCode::NEGATE => {
-                    assert_eq!(*test, 2)
+                    assert_eq!(test, 2)
                 }
                 OpCode::ADD => {
-                    assert_eq!(*test, 3)
+                    assert_eq!(test, 3)
                 }
                 OpCode::SUBSTRACT => {
-                    assert_eq!(*test, 4)
+                    assert_eq!(test, 4)
                 }
                 OpCode::MULTIPLY => {
-                    assert_eq!(*test, 5)
+                    assert_eq!(test, 5)
                 }
                 OpCode::DIVIDE => {
-                    assert_eq!(*test, 6)
+                    assert_eq!(test, 6)
                 }
                 OpCode::NONE => {
-                    assert_eq!(*test, 7)
+                    assert_eq!(test, 7)
                 }
                 OpCode::TRUE => {
-                    assert_eq!(*test, 8)
+                    assert_eq!(test, 8)
                 }
                 OpCode::FALSE => {
-                    assert_eq!(*test, 9)
+                    assert_eq!(test, 9)
                 }
                 OpCode::NOT => {
-                    assert_eq!(*test, 10)
+                    assert_eq!(test, 10)
                 }
                 OpCode::EQUAL => {
-                    assert_eq!(*test, 11)
+                    assert_eq!(test, 11)
                 }
                 OpCode::GREATER => {
-                    assert_eq!(*test, 12)
+                    assert_eq!(test, 12)
                 }
                 OpCode::LESS => {
-                    assert_eq!(*test, 13)
+                    assert_eq!(test, 13)
+                }
+                OpCode::ECHO => {
+                    assert_eq!(test, 14)
+                }
+                OpCode::POP => {
+                    assert_eq!(test, 15)
+                }
+                OpCode::DefineGlobal => {
+                    assert_eq!(test, 16)
+                }
+                OpCode::GetGlobal => {
+                    assert_eq!(test, 17)
+                }
+                OpCode::SetGlobal => {
+                    assert_eq!(test, 18)
+                }
+                OpCode::GetLocal => {
+                    assert_eq!(test, 19)
+                }
+                OpCode::SetLocal => {
+                    assert_eq!(test, 20)
+                }
+                OpCode::JumpIfFalse => {
+                    assert_eq!(test, 21)
+                }
+                OpCode::Jump => {
+                    assert_eq!(test, 21)
                 }
             }
         }

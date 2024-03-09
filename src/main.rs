@@ -2,6 +2,7 @@ mod chunk;
 mod compiler;
 mod debug;
 mod lexer;
+mod object;
 mod value;
 mod vm;
 
@@ -15,7 +16,7 @@ use std::process;
 use vm::InterpretResult;
 
 const DEBUG_PRINT_CODE: bool = true;
-const DEBUG_TRACE_EXECUTION: bool = true;
+const DEBUG_TRACE_EXECUTION: bool = false;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -56,7 +57,7 @@ fn run_file(path: &str) {
     };
 
     let mut vm = vm::VM::init();
-    let result = vm.interpret(&source);
+    let result = vm.interpret(&source.trim());
     match result {
         InterpretResult::CompileErr(msg) => {
             println!("CompileError: {:?}.", msg);
