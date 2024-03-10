@@ -26,6 +26,13 @@ pub enum OpCode {
     SetLocal,
     JumpIfFalse,
     Jump,
+    Loop,
+}
+
+impl Into<usize> for OpCode {
+    fn into(self) -> usize {
+        self as usize
+    }
 }
 
 impl From<usize> for OpCode {
@@ -51,9 +58,10 @@ impl From<usize> for OpCode {
             17 => OpCode::GetGlobal,
             18 => OpCode::SetGlobal,
             19 => OpCode::GetLocal,
-            20 => OpCode::SetGlobal,
+            20 => OpCode::SetLocal,
             21 => OpCode::JumpIfFalse,
             22 => OpCode::Jump,
+            23 => OpCode::Loop,
             _ => panic!("Unkown OpCode"),
         }
     }
@@ -170,7 +178,10 @@ mod tests {
                     assert_eq!(test, 21)
                 }
                 OpCode::Jump => {
-                    assert_eq!(test, 21)
+                    assert_eq!(test, 22)
+                }
+                OpCode::Loop => {
+                    assert_eq!(test, 23)
                 }
             }
         }

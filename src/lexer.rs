@@ -220,7 +220,11 @@ impl<'a> Lexer<'a> {
         loop {
             let c = self.peek();
             match c {
-                ' ' | '\r' | '\t' | '\n' => {
+                ' ' | '\r' | '\t' => {
+                    self.advance();
+                }
+                '\n' => {
+                    self.line += 1;
                     self.advance();
                 }
                 '/' => {

@@ -1,3 +1,5 @@
+use std::u16;
+
 use crate::{
     chunk::{Chunk, OpCode},
     debug::disassemble_chunk,
@@ -139,7 +141,8 @@ impl<'a> Parser<'a> {
     fn parse(&mut self, rule: ParseFn, can_assign: bool) {
         match rule {
             ParseFn::Variable => self.variable(can_assign),
-            ParseFn::And => self.variable(can_assign),
+            ParseFn::And => self.and(),
+            ParseFn::Or => self.or(),
             ParseFn::Binary => self.binary(),
             ParseFn::Grouping => self.grouping(),
             ParseFn::Unary => self.unary(),
@@ -160,7 +163,8 @@ impl<'a> Parser<'a> {
         if self.compiler.scope_depth > 0 {
             return 0;
         }
-        self.make_ident_const(self.prev)
+        let previous = self.prev;
+        self.make_ident_const(&previous)
     }
 
     fn define_var(&mut self, global: usize) {
@@ -176,17 +180,41 @@ impl<'a> Parser<'a> {
             return Ok(());
         }
         let name = &self.prev;
-        let scopes = &self.compiler.locals[..self.compiler.local_count];
-        for local in scopes.iter().rev() {
+        for local in self.compiler.locals.iter().rev() {
             if local.depth != -1 && local.depth < self.compiler.scope_depth {
                 break;
             }
-            if *name == local.name {
+            if self.identifiers_equal(name, &local.name) {
                 return Err("Already a variable with this name in this scope".to_string());
             }
         }
         self.add_local(*name);
         Ok(())
+    }
+
+    fn named_variable(&mut self, name: &Token, can_assign: bool) {
+        let get_op: OpCode;
+        let set_op: OpCode;
+
+        let arg = match self.resolve_local(&name) {
+            Some(arg) => {
+                get_op = OpCode::GetLocal;
+                set_op = OpCode::SetLocal;
+                arg
+            }
+            None => {
+                get_op = OpCode::GetGlobal;
+                set_op = OpCode::SetGlobal;
+                self.make_ident_const(&name)
+            }
+        };
+
+        if can_assign && self.match_token(TokenType::Eq) {
+            self.expression();
+            self.emit_bytes(set_op as usize, arg);
+        } else {
+            self.emit_bytes(get_op as usize, arg);
+        }
     }
 
     fn mark_initialized(&mut self) {
@@ -198,11 +226,27 @@ impl<'a> Parser<'a> {
             self.error("Too many local variables in function.".to_string());
             return;
         }
-        self.compiler.locals.push(Local {
-            name,
-            depth: self.compiler.local_count as isize,
-        });
+        self.compiler.locals.push(Local { name, depth: -1 });
         self.compiler.local_count += 1;
+    }
+
+    fn resolve_local(&mut self, name: &Token) -> Option<usize> {
+        for (i, local) in self.compiler.locals.iter().enumerate().rev() {
+            if self.identifiers_equal(name, &local.name) {
+                if local.depth == -1 {
+                    self.error("Can't read local variable in its own initializer".to_string());
+                }
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn identifiers_equal(&self, a: &Token, b: &Token) -> bool {
+        if a.literal.len() != b.literal.len() {
+            return false;
+        }
+        a.literal == b.literal && a.literal.len() == b.literal.len()
     }
 
     //#[rustfmt::skip]
@@ -269,6 +313,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn var_declaration(&mut self) {
+        let global = self.parse_variable("Expect variable name");
+        if self.match_token(TokenType::Eq) {
+            self.expression();
+        } else {
+            self.emit_byte(OpCode::NONE as usize);
+        }
+        self.consume(
+            TokenType::SemiColon,
+            "Expected ';' after variable definition",
+        );
+        self.define_var(global);
+    }
+
     fn block(&mut self) {
         while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
             self.declaration();
@@ -281,6 +339,10 @@ impl<'a> Parser<'a> {
             self.echo_stmt();
         } else if self.match_token(TokenType::If) {
             self.if_stmt();
+        } else if self.match_token(TokenType::While) {
+            self.while_stmt();
+        } else if self.match_token(TokenType::For) {
+            self.for_stmt();
         } else if self.match_token(TokenType::LeftBrace) {
             self.begin_scope();
             self.block();
@@ -308,6 +370,64 @@ impl<'a> Parser<'a> {
         self.patch_jump(else_jump);
     }
 
+    fn while_stmt(&mut self) {
+        let loop_start = self.compile_chunk.code.len();
+        self.expression();
+        self.consume(TokenType::Colon, "Expect ':' after condition");
+
+        let exit_jump = self.emit_jump(OpCode::JumpIfFalse as usize);
+        self.emit_byte(OpCode::POP as usize);
+        self.statement();
+        self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+        self.emit_byte(OpCode::POP as usize);
+    }
+
+    fn for_stmt(&mut self) {
+        self.begin_scope();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for' ");
+        if self.match_token(TokenType::SemiColon) {
+            // No initializer
+        } else if self.match_token(TokenType::Let) {
+            self.var_declaration();
+        } else {
+            self.expression_stmt();
+        }
+        let mut loop_start = self.compile_chunk.code.len();
+        let mut exit_jump = -1;
+        if !self.match_token(TokenType::SemiColon) {
+            self.expression();
+            self.consume(TokenType::SemiColon, "Expect ';' after loop condition");
+
+            // Jump out if the condition is false.
+            exit_jump = self.emit_jump(OpCode::JumpIfFalse as usize);
+            self.emit_byte(OpCode::POP as usize);
+        }
+
+        if !self.match_token(TokenType::RightParen) {
+            let body_jump = self.emit_jump(OpCode::Jump as usize);
+            let increment_start = self.compile_chunk.code.len();
+            self.expression();
+            self.emit_byte(OpCode::POP as usize);
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(body_jump);
+        }
+
+        self.statement();
+        self.emit_loop(loop_start);
+
+        if exit_jump != -1 {
+            self.patch_jump(exit_jump);
+            self.emit_byte(OpCode::POP as usize);
+        }
+
+        self.end_scope();
+    }
+
     fn echo_stmt(&mut self) {
         self.expression();
         self.consume(TokenType::SemiColon, "Expected ';' after value");
@@ -318,20 +438,6 @@ impl<'a> Parser<'a> {
         self.expression();
         self.consume(TokenType::SemiColon, "Expected ';' after expression");
         self.emit_byte(OpCode::POP as usize);
-    }
-
-    fn var_declaration(&mut self) {
-        let global = self.parse_variable("Expect variable name");
-        if self.match_token(TokenType::Eq) {
-            self.expression();
-        } else {
-            self.emit_byte(OpCode::NONE as usize);
-        }
-        self.consume(
-            TokenType::SemiColon,
-            "Expected ';' after variable definition",
-        );
-        self.define_var(global);
     }
 
     fn expression(&mut self) {
@@ -409,45 +515,8 @@ impl<'a> Parser<'a> {
     }
 
     fn variable(&mut self, can_assign: bool) {
-        self.named_variable(self.prev, can_assign);
-    }
-
-    fn named_variable(&mut self, name: Token, can_assign: bool) {
-        let get_op: OpCode;
-        let set_op: OpCode;
-
-        let arg = match self.resolve_local(&name) {
-            Some(arg) => {
-                get_op = OpCode::GetLocal;
-                set_op = OpCode::SetLocal;
-                arg
-            }
-            None => {
-                get_op = OpCode::GetGlobal;
-                set_op = OpCode::SetGlobal;
-                self.make_ident_const(name)
-            }
-        };
-
-        if can_assign && self.match_token(TokenType::Eq) {
-            self.expression();
-            self.emit_bytes(set_op as usize, arg);
-        } else {
-            self.emit_bytes(get_op as usize, arg);
-        }
-    }
-
-    fn resolve_local(&mut self, name: &Token) -> Option<usize> {
-        let scopes = &self.compiler.locals[..self.compiler.local_count];
-        for (i, local) in scopes.iter().enumerate().rev() {
-            if name == &local.name {
-                if local.depth == -1 {
-                    self.error("Can't read local variable in its own initializer".to_string());
-                }
-                return Some(i);
-            }
-        }
-        None
+        let mut _previous = self.prev;
+        self.named_variable(&_previous, can_assign);
     }
 
     fn literal(&mut self) {
@@ -528,6 +597,7 @@ impl<'a> Parser<'a> {
         {
             self.emit_byte(OpCode::POP as usize);
             self.compiler.local_count -= 1;
+            self.compiler.locals.pop();
         }
     }
 
@@ -544,7 +614,7 @@ impl<'a> Parser<'a> {
     //                      Compiling Chunks
     // -----------------------------------------------------------
 
-    fn make_ident_const(&mut self, name: Token) -> usize {
+    fn make_ident_const(&mut self, name: &Token) -> usize {
         self.make_const(Value::obj_val(ObjType::String(ObjString {
             len: name.literal.len().clone(),
             chars: name
@@ -579,6 +649,18 @@ impl<'a> Parser<'a> {
         self.emit_byte(0xff);
         self.emit_byte(0xff);
         (self.compile_chunk.code.len() - 2) as isize
+    }
+
+    fn emit_loop(&mut self, loop_start: usize) {
+        self.emit_byte(OpCode::Loop as usize);
+
+        let offset = self.compile_chunk.code.len() - loop_start + 2;
+        if offset as u16 > u16::MAX {
+            self.error("Loop body too large.".to_string());
+        }
+
+        self.emit_byte(offset >> 8 & 0xff);
+        self.emit_byte(offset & 0xff)
     }
 
     fn patch_jump(&mut self, offset: isize) {
@@ -620,7 +702,7 @@ impl<'a> Parser<'a> {
         match token._type {
             TokenType::Eof => print!(" at end"),
             TokenType::Err => (),
-            _ => print!(" at {}", token.literal),
+            _ => print!(" at '{}' ", token.literal),
         }
         println!(": {}", msg);
         self.had_error = true;

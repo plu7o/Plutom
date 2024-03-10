@@ -48,7 +48,7 @@ impl VM {
         let mut parser = Parser::init(lexer, compiler, &mut chunk);
 
         if !parser.compile() {
-            return InterpretResult::CompileErr("CompileError: Fatal");
+            return InterpretResult::CompileErr("CompileError: Panicked");
         }
 
         self.chunk = Box::new(chunk);
@@ -128,6 +128,10 @@ impl VM {
                 OpCode::SetLocal => {
                     let slot = self.read_chunk();
                     self.stack[slot] = self.peek(0).clone();
+                }
+                OpCode::Loop => {
+                    let offset = read_short!();
+                    self.ip -= offset as usize;
                 }
                 OpCode::JumpIfFalse => {
                     let offset = read_short!();

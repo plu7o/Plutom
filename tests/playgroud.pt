@@ -1,6 +1,9 @@
-let outer = "outer";
-if 1==1: {
-	echo "YOO";
-} else {
-	echo "NOO";
+let i = 0;
+while i < 10: {
+	echo i;
+	i = i + 1;
+}
+
+for (let i = 0; i <= 3; i = i + 1) {
+	echo i;
 }

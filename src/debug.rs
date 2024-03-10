@@ -1,3 +1,5 @@
+use std::isize;
+
 use crate::chunk::{Chunk, OpCode};
 
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
@@ -42,6 +44,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::POP => simple_op("POP", offset),
         OpCode::JumpIfFalse => jump_op("JUMP_IF_FALSE", 1, &chunk, offset),
         OpCode::Jump => jump_op("JUMP", 1, &chunk, offset),
+        OpCode::Loop => jump_op("LOOP", -1, &chunk, offset),
     }
 }
 
@@ -52,26 +55,27 @@ fn simple_op(name: &str, offset: usize) -> usize {
 
 fn byte_op(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let slot = chunk.code[offset + 1];
-    print!("{:16} [{}] ", name, slot);
+    print!("{:16} [{}] = ", name, slot);
+    chunk.constants[slot].print();
     println!();
     return offset + 2;
 }
 
-fn jump_op(name: &str, sign: usize, chunk: &Chunk, offset: usize) -> usize {
+fn jump_op(name: &str, sign: isize, chunk: &Chunk, offset: usize) -> usize {
     let jump = (chunk.code[offset + 1] << 8) as u16;
     let jump = jump | chunk.code[offset + 2] as u16;
     println!(
         "{} {} -> {}",
         name,
         offset,
-        offset + 3 + sign * jump as usize
+        offset as isize + 3 + sign * jump as isize
     );
     offset + 3
 }
 
 fn constant_op(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let slot = chunk.code[offset + 1];
-    print!("{:16} [{}] ", name, slot);
+    print!("{:16} [{}] = ", name, slot);
     chunk.constants[slot].print();
     println!();
     offset + 2
