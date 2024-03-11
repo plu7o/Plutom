@@ -1,9 +1,6 @@
-let i = 0;
-while i < 10: {
-	echo i;
-	i = i + 1;
-}
-
-for (let i = 0; i <= 3; i = i + 1) {
-	echo i;
+let a = 1;
+match a {
+	2 - 1 => echo 1;
+	1 => echo 2;
+	3 => echo 3;
 }

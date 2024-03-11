@@ -1,4 +1,4 @@
-use std::u16;
+use std::{isize, u16, usize};
 
 use crate::{
     chunk::{Chunk, OpCode},
@@ -264,6 +264,7 @@ impl<'a> Parser<'a> {
                 Precedence::TERM,
             ),
             TokenType::Plus => ParseRule::new(None, Some(ParseFn::Binary), Precedence::TERM),
+            TokenType::UnderScore => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Colon => ParseRule::new(None, None, Precedence::NONE),
             TokenType::SemiColon => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Slash => ParseRule::new(None, Some(ParseFn::Binary), Precedence::FACTOR),
@@ -286,7 +287,9 @@ impl<'a> Parser<'a> {
             TokenType::False => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
             TokenType::For => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Fn => ParseRule::new(None, None, Precedence::CALL),
+            TokenType::Arm => ParseRule::new(None, None, Precedence::NONE),
             TokenType::If => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Match => ParseRule::new(None, None, Precedence::NONE),
             TokenType::None => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
             TokenType::Or => ParseRule::new(None, Some(ParseFn::Or), Precedence::OR),
             TokenType::Echo => ParseRule::new(None, None, Precedence::NONE),
@@ -339,6 +342,8 @@ impl<'a> Parser<'a> {
             self.echo_stmt();
         } else if self.match_token(TokenType::If) {
             self.if_stmt();
+        } else if self.match_token(TokenType::Match) {
+            self.match_stmt();
         } else if self.match_token(TokenType::While) {
             self.while_stmt();
         } else if self.match_token(TokenType::For) {
@@ -370,6 +375,30 @@ impl<'a> Parser<'a> {
         self.patch_jump(else_jump);
     }
 
+    fn match_stmt(&mut self) {
+        self.expression();
+        self.consume(TokenType::LeftBrace, "Expect '{' after match expression");
+
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            if !self.match_token(TokenType::UnderScore) {
+                // case
+                self.expression();
+                self.emit_byte(OpCode::Compare as usize);
+                let jump_index = self.emit_jump(OpCode::JumpIfFalse as usize);
+                self.consume(TokenType::Arm, "Expect '=>' after case expression");
+                self.statement();
+                self.patch_jump(jump_index);
+                self.emit_byte(OpCode::POP as usize);
+            } else {
+                // default
+                self.consume(TokenType::Arm, "Expect '=>' after case expression");
+                self.statement();
+            }
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after match body");
+    }
+
     fn while_stmt(&mut self) {
         let loop_start = self.compile_chunk.code.len();
         self.expression();
@@ -395,13 +424,13 @@ impl<'a> Parser<'a> {
             self.expression_stmt();
         }
         let mut loop_start = self.compile_chunk.code.len();
-        let mut exit_jump = -1;
+        let mut exit_jump = Option::None;
         if !self.match_token(TokenType::SemiColon) {
             self.expression();
             self.consume(TokenType::SemiColon, "Expect ';' after loop condition");
 
             // Jump out if the condition is false.
-            exit_jump = self.emit_jump(OpCode::JumpIfFalse as usize);
+            exit_jump = Some(self.emit_jump(OpCode::JumpIfFalse as usize));
             self.emit_byte(OpCode::POP as usize);
         }
 
@@ -420,8 +449,8 @@ impl<'a> Parser<'a> {
         self.statement();
         self.emit_loop(loop_start);
 
-        if exit_jump != -1 {
-            self.patch_jump(exit_jump);
+        if exit_jump.is_some() {
+            self.patch_jump(exit_jump.unwrap());
             self.emit_byte(OpCode::POP as usize);
         }
 
@@ -644,11 +673,11 @@ impl<'a> Parser<'a> {
         self.emit_byte(byte_2);
     }
 
-    fn emit_jump(&mut self, instruction: usize) -> isize {
+    fn emit_jump(&mut self, instruction: usize) -> usize {
         self.emit_byte(instruction);
         self.emit_byte(0xff);
         self.emit_byte(0xff);
-        (self.compile_chunk.code.len() - 2) as isize
+        self.compile_chunk.code.len() - 2
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
@@ -663,10 +692,10 @@ impl<'a> Parser<'a> {
         self.emit_byte(offset & 0xff)
     }
 
-    fn patch_jump(&mut self, offset: isize) {
-        let jump = self.compile_chunk.code.len() - offset as usize - 2;
-        self.compile_chunk.code[offset as usize] = (jump >> 8) & 0xff;
-        self.compile_chunk.code[offset as usize + 1] = jump & 0xff;
+    fn patch_jump(&mut self, offset: usize) {
+        let jump = self.compile_chunk.code.len() - offset - 2;
+        self.compile_chunk.code[offset] = (jump >> 8) & 0xff;
+        self.compile_chunk.code[offset + 1] = jump & 0xff;
     }
 
     fn emit_const(&mut self, value: Value) {

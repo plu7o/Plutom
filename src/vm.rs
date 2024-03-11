@@ -173,7 +173,12 @@ impl VM {
                     let b: Value = self.pop();
                     self.push(Value::bool_val(a == b))
                 }
-
+                OpCode::Compare => {
+                    let a: Value = self.peek(1).clone();
+                    let b: Value = self.peek(0).clone();
+                    self.pop();
+                    self.push(Value::bool_val(a == b));
+                }
                 OpCode::CONST => {
                     let constant: Value = self.read_constant().clone();
                     self.push(constant);

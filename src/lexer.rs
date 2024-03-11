@@ -16,6 +16,7 @@ pub enum TokenType {
     Slash,
     Star,
     Dollar,
+    UnderScore,
 
     // One or two character tokens.
     Bang,
@@ -26,6 +27,7 @@ pub enum TokenType {
     GtEq,
     Lt,
     LtEq,
+    Arm,
 
     // Literals.
     Ident,
@@ -49,6 +51,7 @@ pub enum TokenType {
     Class,
     Super,
     This,
+    Match,
 
     Err,
     Eof,
@@ -131,6 +134,7 @@ impl<'a> Lexer<'a> {
             '/' => self.make_token(TokenType::Slash),
             '*' => self.make_token(TokenType::Star),
             '$' => self.make_token(TokenType::Dollar),
+            '_' => self.make_token(TokenType::UnderScore),
             '"' => self.string(),
             '!' => {
                 let token = if self.match_token('=') {
@@ -143,6 +147,8 @@ impl<'a> Lexer<'a> {
             '=' => {
                 let token = if self.match_token('=') {
                     TokenType::EqEq
+                } else if self.match_token('>') {
+                    TokenType::Arm
                 } else {
                     TokenType::Eq
                 };
@@ -303,6 +309,7 @@ impl<'a> Lexer<'a> {
             'i' => return self.check_keyword(1, 1, "f", TokenType::If),
             'l' => return self.check_keyword(1, 2, "et", TokenType::Let),
             'n' => return self.check_keyword(1, 3, "one", TokenType::None),
+            'm' => return self.check_keyword(1, 4, "atch", TokenType::Match),
             'o' => return self.check_keyword(1, 1, "r", TokenType::Or),
             'r' => return self.check_keyword(1, 5, "eturn", TokenType::Return),
             's' => return self.check_keyword(1, 4, "uper", TokenType::Super),

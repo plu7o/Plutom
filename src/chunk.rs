@@ -27,6 +27,7 @@ pub enum OpCode {
     JumpIfFalse,
     Jump,
     Loop,
+    Compare,
 }
 
 impl Into<usize> for OpCode {
@@ -62,6 +63,7 @@ impl From<usize> for OpCode {
             21 => OpCode::JumpIfFalse,
             22 => OpCode::Jump,
             23 => OpCode::Loop,
+            24 => OpCode::Compare,
             _ => panic!("Unkown OpCode"),
         }
     }
@@ -182,6 +184,9 @@ mod tests {
                 }
                 OpCode::Loop => {
                     assert_eq!(test, 23)
+                }
+                OpCode::Compare => {
+                    assert_eq!(test, 24)
                 }
             }
         }

@@ -42,6 +42,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::LESS => simple_op("LESS", offset),
         OpCode::ECHO => simple_op("ECHO", offset),
         OpCode::POP => simple_op("POP", offset),
+        OpCode::Compare => simple_op("COMPARE", offset),
         OpCode::JumpIfFalse => jump_op("JUMP_IF_FALSE", 1, &chunk, offset),
         OpCode::Jump => jump_op("JUMP", 1, &chunk, offset),
         OpCode::Loop => jump_op("LOOP", -1, &chunk, offset),
