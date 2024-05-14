@@ -5,6 +5,8 @@ pub enum ObjType {
     String(ObjString),
     Function(ObjFunction),
     Native(ObjNative),
+    Closure(ObjClosure),
+    List(ObjList),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -58,5 +60,31 @@ pub struct ObjNative {
 impl ObjNative {
     pub fn new(function: NativeFn) -> Self {
         Self { function }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct ObjClosure {
+    pub function: ObjFunction,
+}
+
+impl ObjClosure {
+    pub fn new(function: ObjFunction) -> Self {
+        Self { function }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Hash)]
+pub struct ObjList {
+    pub len: usize,
+    pub items: Vec<Value>,
+}
+
+impl ObjList {
+    pub fn new(items: Vec<Value>) -> Self {
+        Self {
+            len: items.len(),
+            items,
+        }
     }
 }

@@ -1,4 +1,4 @@
-use crate::object::{ObjString, ObjType};
+use crate::object::{ObjFunction, ObjList, ObjString, ObjType};
 
 #[derive(Debug, Clone, PartialEq, Hash)]
 pub enum ValueType {
@@ -96,12 +96,30 @@ impl Value {
     //     }
     // }
     //
-    // pub fn as_function(&self) -> &ObjFunction {
-    //     match self.as_obj() {
-    //         ObjType::Function(func) => func,
-    //         _ => panic!("{:?} is not a function objects", self._type),
-    //     }
-    // }
+    pub fn as_function(&self) -> &ObjFunction {
+        match self.as_obj() {
+            ObjType::Function(func) => func,
+            _ => panic!("{:?} is not a function objects", self._type),
+        }
+    }
+
+    pub fn as_list(&self) -> &ObjList {
+        match self.as_obj() {
+            ObjType::List(list) => list,
+            _ => panic!("{:?} is not a list object", self._type),
+        }
+    }
+
+    pub fn is_list(&self) -> bool {
+        match &self._type {
+            ValueType::Object(obj) => match obj {
+                ObjType::List(_) => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     //
     // pub fn is_native(&self) -> bool {
     //     match &self._type {
@@ -138,9 +156,9 @@ impl Value {
         }
     }
 
-    // pub fn is_obj_type(&self, _type: &ObjType) -> bool {
-    //     self.is_obj() && (self.as_obj() == _type)
-    // }
+    pub fn is_obj_type(&self, _type: &ObjType) -> bool {
+        self.is_obj() && (self.as_obj() == _type)
+    }
 
     pub fn print(&self) {
         match &self._type {
@@ -159,6 +177,17 @@ impl Value {
                     None => print!("<Script>"),
                 },
                 ObjType::Native(_) => print!("<native fn>"),
+                ObjType::Closure(_) => print!("<closure fn>"),
+                ObjType::List(list) => {
+                    print!("[");
+                    for (i, item) in list.items.iter().enumerate() {
+                        item.print();
+                        if i != list.items.len() - 1 {
+                            print!(", ");
+                        }
+                    }
+                    print!("]")
+                }
             },
             ValueType::None => print!("none"),
         }

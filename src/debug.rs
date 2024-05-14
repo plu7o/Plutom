@@ -26,10 +26,12 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::DefineGlobal => constant_op("DEFINE_GLOBAL", &chunk, offset),
         OpCode::GetGlobal => constant_op("GET_GLOBAL", &chunk, offset),
         OpCode::SetGlobal => constant_op("SET_GLOBAL", &chunk, offset),
+        OpCode::List => constant_op("LIST", &chunk, offset),
         OpCode::GetLocal => byte_op("GET_LOCAL", &chunk, offset),
         OpCode::SetLocal => byte_op("SET_LOCAL", &chunk, offset),
         OpCode::Call => byte_op("CALL", &chunk, offset),
         OpCode::RETURN => simple_op("RETURN", offset),
+        OpCode::Index => simple_op("INDEX", offset),
         OpCode::NEGATE => simple_op("NEGATE", offset),
         OpCode::ADD => simple_op("ADD", offset),
         OpCode::SUBSTRACT => simple_op("SUBSTRACT", offset),
@@ -48,6 +50,16 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::JumpIfFalse => jump_op("JUMP_IF_FALSE", 1, &chunk, offset),
         OpCode::Jump => jump_op("JUMP", 1, &chunk, offset),
         OpCode::Loop => jump_op("LOOP", -1, &chunk, offset),
+        OpCode::Closure => {
+            let mut offset = offset;
+            offset += 1;
+            let constant = chunk.code[offset];
+            offset += 1;
+            print!("{:16} {:4} ", "CLOSURE", constant);
+            chunk.constants[constant].print();
+            println!();
+            offset
+        }
     }
 }
 

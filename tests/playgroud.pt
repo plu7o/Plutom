@@ -1,4 +1,6 @@
-let i = input("hello? ");
-echo i;
+let list = ["moin", 2, true];
+print(list);
+
+
 
 

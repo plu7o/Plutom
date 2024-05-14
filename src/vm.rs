@@ -5,7 +5,7 @@ use crate::{
     compiler::{Compiler, FunctionType},
     debug::disassemble_instruction,
     natives,
-    object::{ObjFunction, ObjNative, ObjString, ObjType},
+    object::{ObjClosure, ObjList, ObjNative, ObjString, ObjType},
     value::{Value, ValueType},
     DEBUG_TRACE_EXECUTION,
 };
@@ -18,7 +18,7 @@ pub enum InterpretResult<T, E> {
 
 #[derive(Debug, Clone)]
 struct CallFrame {
-    function: ObjFunction,
+    closure: ObjClosure,
     ip: usize,
     slots: Vec<Value>,
 }
@@ -63,7 +63,11 @@ impl VM {
         };
 
         self.push(Value::obj_val(ObjType::Function(function.clone())));
-        self.call(&function, 0);
+        let closure = ObjClosure::new(function);
+        self.pop();
+        self.push(Value::obj_val(ObjType::Closure(closure.clone())));
+        self.call(&closure, 0);
+
         self.run()
     }
 
@@ -84,7 +88,7 @@ impl VM {
 
         macro_rules! read_byte {
             () => {{
-                let byte = frame.function.chunk.code[frame.ip];
+                let byte = frame.closure.function.chunk.code[frame.ip];
                 frame.ip += 1;
                 byte
             }};
@@ -93,14 +97,14 @@ impl VM {
         macro_rules! read_short {
             () => {{
                 frame.ip += 2;
-                let offset = (frame.function.chunk.code[frame.ip - 2] << 8) as u16;
-                offset | frame.function.chunk.code[frame.ip - 1] as u16
+                let offset = (frame.closure.function.chunk.code[frame.ip - 2] << 8) as u16;
+                offset | frame.closure.function.chunk.code[frame.ip - 1] as u16
             }};
         }
 
         macro_rules! read_const {
             () => {{
-                frame.function.chunk.constants[read_byte!()].clone()
+                frame.closure.function.chunk.constants[read_byte!()].clone()
             }};
         }
 
@@ -112,7 +116,7 @@ impl VM {
                     print!(" ]");
                 }
                 println!();
-                disassemble_instruction(&frame.function.chunk, frame.ip);
+                disassemble_instruction(&frame.closure.function.chunk, frame.ip);
             }
 
             let instruction = read_byte!();
@@ -229,7 +233,7 @@ impl VM {
                     let arg_count = read_byte!();
                     self.frames[self.frame_count - 1] = frame.to_owned();
                     if !self.call_value(self.peek(arg_count).clone(), arg_count) {
-                        return InterpretResult::RuntimeErr("Error Calling function");
+                        return InterpretResult::RuntimeErr("CallError");
                     }
                     frame = self.frames[self.frame_count - 1].to_owned();
                 }
@@ -249,6 +253,67 @@ impl VM {
                     self.push(result);
                     frame = self.frames[self.frame_count - 1].to_owned();
                 }
+                OpCode::Closure => {
+                    let function = read_const!();
+                    let closure = ObjClosure::new(function.as_function().clone());
+                    self.push(Value::obj_val(ObjType::Closure(closure)));
+                }
+                OpCode::List => {
+                    let item_count = read_const!();
+                    let mut items: Vec<Value> = vec![];
+
+                    for _ in 0..item_count.as_number() {
+                        items.push(self.pop().clone());
+                    }
+
+                    items.reverse();
+                    let list = ObjList::new(items);
+                    self.push(Value::obj_val(ObjType::List(list)));
+                }
+                OpCode::Index => {
+                    let index = self.pop();
+                    let list = self.pop();
+
+                    if !list.is_list() {
+                        self.runtime_error(&format!("Value: {:#?} is not indexable ", list));
+                        return InterpretResult::RuntimeErr("IndexError");
+                    }
+
+                    if !index.is_number() {
+                        self.runtime_error(&format!(
+                            "Index Value must be a number but got: {:#?}",
+                            index
+                        ));
+                        return InterpretResult::RuntimeErr("IndexError");
+                    }
+                    let num_index = index.as_number();
+                    let raw_items = list.as_list();
+
+                    if num_index >= raw_items.items.len() as i64 {
+                        self.runtime_error(&format!(
+                            "Index overflow index is {:?} but len is {:?}",
+                            num_index,
+                            raw_items.items.len()
+                        ));
+                        return InterpretResult::RuntimeErr("IndexError");
+                    }
+
+                    if raw_items.items.len() as i64 + num_index < 0 {
+                        self.runtime_error(&format!(
+                            "Index underflow index is {:?} but len is {:?}",
+                            num_index,
+                            raw_items.items.len()
+                        ));
+                        return InterpretResult::RuntimeErr("IndexError");
+                    }
+
+                    if num_index.is_negative() {
+                        let offset = raw_items.items.len() as i64 + num_index;
+                        self.push(raw_items.items[offset as usize].clone());
+                    } else {
+                        self.push(raw_items.items[num_index as usize].clone());
+                    }
+                }
             }
         }
     }
@@ -256,7 +321,7 @@ impl VM {
     fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
         if callee.is_obj() {
             match callee.as_obj() {
-                ObjType::Function(func) => return self.call(func, arg_count),
+                ObjType::Closure(closure) => return self.call(closure, arg_count),
                 ObjType::Native(native) => {
                     let result =
                         (native.function)(arg_count, &self.stack[self.stack_top - arg_count..]);
@@ -283,11 +348,11 @@ impl VM {
         false
     }
 
-    fn call(&mut self, function: &ObjFunction, arg_count: usize) -> bool {
-        if arg_count != function.arity {
+    fn call(&mut self, closure: &ObjClosure, arg_count: usize) -> bool {
+        if arg_count != closure.function.arity {
             self.runtime_error(&format!(
                 "Expected {} arguments but got {}",
-                function.arity, arg_count
+                closure.function.arity, arg_count
             ));
             return false;
         }
@@ -298,7 +363,7 @@ impl VM {
         }
 
         let frame = CallFrame {
-            function: function.clone(),
+            closure: closure.clone(),
             ip: 0,
             slots: self.stack[self.stack_top - arg_count - 1..].to_vec(),
         };
@@ -365,12 +430,12 @@ impl VM {
     fn runtime_error(&mut self, format: &str) {
         let frame = &self.frames[self.frame_count - 1];
         let instruction = frame.ip;
-        let line = frame.function.chunk.get_line(instruction);
+        let line = frame.closure.function.chunk.get_line(instruction);
         println!("[Line {}] {}", line, format);
 
         for i in (0..self.frame_count - 1).rev() {
             let frame = &self.frames[i];
-            let function = &frame.function;
+            let function = &frame.closure.function;
             let instruction = frame.ip - function.chunk.code.len() - 1;
             eprint!("[line {}] in ", function.chunk.get_line(instruction));
             if let Some(name) = &function.name {

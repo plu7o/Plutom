@@ -5,7 +5,7 @@ use crate::{
     value::{Value, ValueType},
 };
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Precedence {
     NONE,
     ASSIGNMENT, // =
@@ -13,6 +13,7 @@ enum Precedence {
     AND,        // and
     EQUALITY,   // == !=
     COMPARISON, // < > <= >=
+    INDEX,      // []
     TERM,       // + -
     FACTOR,     // * /
     UNARY,      // ! -
@@ -20,10 +21,12 @@ enum Precedence {
     PRIMARY,
 }
 
+#[derive(Debug)]
 enum ParseFn {
     Variable,
     And,
     Or,
+    Index,
     Binary,
     Grouping,
     Unary,
@@ -33,6 +36,7 @@ enum ParseFn {
     Call,
 }
 
+#[derive(Debug)]
 struct ParseRule {
     prefix: Option<ParseFn>,
     infix: Option<ParseFn>,
@@ -171,6 +175,7 @@ impl<'a> Parser<'a> {
             ParseFn::String => self.string(),
             ParseFn::Literal => self.literal(),
             ParseFn::Call => self.call(can_assign),
+            ParseFn::Index => self.index(can_assign),
         }
     }
 
@@ -285,6 +290,8 @@ impl<'a> Parser<'a> {
             TokenType::RightParen   => ParseRule::new(None, None, Precedence::NONE),
             TokenType::LeftBrace    => ParseRule::new(None, None, Precedence::NONE),
             TokenType::RightBrace   => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::LeftBracket  => ParseRule::new(Some(ParseFn::Literal), Some(ParseFn::Index), Precedence::INDEX),
+            TokenType::RightBracket => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Comma        => ParseRule::new(None, None, Precedence::NONE),
             //> Classes and Instances
             TokenType::Dot          => ParseRule::new(None, None, Precedence::NONE),
@@ -405,7 +412,7 @@ impl<'a> Parser<'a> {
         let obj = ObjType::Function(function);
         let value = self.make_const(Value::obj_val(obj));
 
-        self.emit_bytes(OpCode::CONST as usize, value);
+        self.emit_bytes(OpCode::Closure as usize, value);
     }
 
     fn call(&mut self, _can_assign: bool) {
@@ -608,6 +615,12 @@ impl<'a> Parser<'a> {
         self.patch_jump(end_jump)
     }
 
+    fn index(&mut self, _can_assign: bool) {
+        self.expression();
+        self.consume(TokenType::RightBracket, "Expected ']' after index value.");
+        self.emit_byte(OpCode::Index as usize);
+    }
+
     fn binary(&mut self) {
         let op_type = self.prev._type;
         let rule = self.get_rule(op_type);
@@ -624,7 +637,7 @@ impl<'a> Parser<'a> {
             TokenType::Minus => self.emit_byte(OpCode::SUBSTRACT as usize),
             TokenType::Star => self.emit_byte(OpCode::MULTIPLY as usize),
             TokenType::Slash => self.emit_byte(OpCode::DIVIDE as usize),
-            _ => (),
+            _ => self.error_at_current(format!("{:#?} is not a binary operator", op_type)),
         }
     }
 
@@ -639,7 +652,7 @@ impl<'a> Parser<'a> {
         match op_type {
             TokenType::Minus => self.emit_byte(OpCode::NEGATE as usize),
             TokenType::Bang => self.emit_byte(OpCode::NOT as usize),
-            _ => (),
+            _ => self.error_at_current(format!("{:#?} is not a unary operator", op_type)),
         }
     }
 
@@ -661,6 +674,24 @@ impl<'a> Parser<'a> {
         })));
     }
 
+    fn list(&mut self) {
+        let mut item_count = 0;
+
+        if !self.check(TokenType::RightBracket) {
+            loop {
+                self.expression();
+                item_count += 1;
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightBracket, "Expect ']' after list values");
+        let value = self.make_const(Value::number_val(item_count));
+        self.emit_bytes(OpCode::List as usize, value);
+    }
+
     fn variable(&mut self, can_assign: bool) {
         let mut _previous = self.prev;
         self.named_variable(&_previous, can_assign);
@@ -671,7 +702,8 @@ impl<'a> Parser<'a> {
             TokenType::False => self.emit_byte(OpCode::FALSE as usize),
             TokenType::True => self.emit_byte(OpCode::TRUE as usize),
             TokenType::None => self.emit_byte(OpCode::NONE as usize),
-            _ => (),
+            TokenType::LeftBracket => self.list(),
+            _ => self.error_at_current(format!("{:#?} is not a literal", self.prev._type)),
         };
     }
 

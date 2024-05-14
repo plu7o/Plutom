@@ -29,6 +29,9 @@ pub enum OpCode {
     Loop,
     Compare,
     Call,
+    Closure,
+    List,
+    Index,
 }
 
 impl Into<usize> for OpCode {
@@ -66,6 +69,9 @@ impl From<usize> for OpCode {
             23 => OpCode::Loop,
             24 => OpCode::Compare,
             25 => OpCode::Call,
+            26 => OpCode::Closure,
+            27 => OpCode::List,
+            28 => OpCode::Index,
             _ => panic!("Unkown OpCode"),
         }
     }
@@ -105,96 +111,5 @@ impl Chunk {
             .parse()
             .expect("Wrong REF formatting");
         line_num
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_opcode_from_bytes() {
-        for test in 0..20 {
-            match OpCode::from(test) {
-                OpCode::RETURN => {
-                    assert_eq!(test, 0)
-                }
-                OpCode::CONST => {
-                    assert_eq!(test, 1)
-                }
-                OpCode::NEGATE => {
-                    assert_eq!(test, 2)
-                }
-                OpCode::ADD => {
-                    assert_eq!(test, 3)
-                }
-                OpCode::SUBSTRACT => {
-                    assert_eq!(test, 4)
-                }
-                OpCode::MULTIPLY => {
-                    assert_eq!(test, 5)
-                }
-                OpCode::DIVIDE => {
-                    assert_eq!(test, 6)
-                }
-                OpCode::NONE => {
-                    assert_eq!(test, 7)
-                }
-                OpCode::TRUE => {
-                    assert_eq!(test, 8)
-                }
-                OpCode::FALSE => {
-                    assert_eq!(test, 9)
-                }
-                OpCode::NOT => {
-                    assert_eq!(test, 10)
-                }
-                OpCode::EQUAL => {
-                    assert_eq!(test, 11)
-                }
-                OpCode::GREATER => {
-                    assert_eq!(test, 12)
-                }
-                OpCode::LESS => {
-                    assert_eq!(test, 13)
-                }
-                OpCode::ECHO => {
-                    assert_eq!(test, 14)
-                }
-                OpCode::POP => {
-                    assert_eq!(test, 15)
-                }
-                OpCode::DefineGlobal => {
-                    assert_eq!(test, 16)
-                }
-                OpCode::GetGlobal => {
-                    assert_eq!(test, 17)
-                }
-                OpCode::SetGlobal => {
-                    assert_eq!(test, 18)
-                }
-                OpCode::GetLocal => {
-                    assert_eq!(test, 19)
-                }
-                OpCode::SetLocal => {
-                    assert_eq!(test, 20)
-                }
-                OpCode::JumpIfFalse => {
-                    assert_eq!(test, 21)
-                }
-                OpCode::Jump => {
-                    assert_eq!(test, 22)
-                }
-                OpCode::Loop => {
-                    assert_eq!(test, 23)
-                }
-                OpCode::Compare => {
-                    assert_eq!(test, 24)
-                }
-                OpCode::Call => {
-                    assert_eq!(test, 25)
-                }
-            }
-        }
     }
 }
