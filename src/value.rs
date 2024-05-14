@@ -1,16 +1,14 @@
-use core::panic;
-
 use crate::object::{ObjString, ObjType};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub enum ValueType {
     Bool(bool),
-    Number(f64),
+    Number(i64),
     Object(ObjType),
     None,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct Value {
     _type: ValueType,
 }
@@ -49,11 +47,11 @@ impl Value {
         }
     }
 
-    pub fn number_val(value: f64) -> Value {
+    pub fn number_val(value: i64) -> Value {
         Value::new(ValueType::Number(value))
     }
 
-    pub fn as_number(&self) -> f64 {
+    pub fn as_number(&self) -> i64 {
         match self._type {
             ValueType::Number(value) => value,
             _ => panic!("ValueError: {:?} is not a number", self._type),
@@ -70,16 +68,57 @@ impl Value {
     pub fn as_string(&self) -> &ObjString {
         match self.as_obj() {
             ObjType::String(string) => string,
-            // _ => panic!("{:?} is not a string", self._type),
+            _ => panic!("{:?} is not a string", self._type),
         }
     }
 
     pub fn is_string(&self) -> bool {
         match &self._type {
-            ValueType::Object(obj) => self.is_obj_type(&obj),
+            ValueType::Object(obj) => match obj {
+                ObjType::String(_) => true,
+                _ => false,
+            },
             _ => false,
         }
     }
+
+    pub fn string_val(s: String) -> Value {
+        Value::obj_val(ObjType::String(ObjString::new(s)))
+    }
+
+    // pub fn is_function(&self) -> bool {
+    //     match &self._type {
+    //         ValueType::Object(obj) => match obj {
+    //             ObjType::Function(_) => true,
+    //             _ => false,
+    //         },
+    //         _ => false,
+    //     }
+    // }
+    //
+    // pub fn as_function(&self) -> &ObjFunction {
+    //     match self.as_obj() {
+    //         ObjType::Function(func) => func,
+    //         _ => panic!("{:?} is not a function objects", self._type),
+    //     }
+    // }
+    //
+    // pub fn is_native(&self) -> bool {
+    //     match &self._type {
+    //         ValueType::Object(obj) => match obj {
+    //             ObjType::Native(_) => true,
+    //             _ => false,
+    //         },
+    //         _ => false,
+    //     }
+    // }
+    //
+    // pub fn as_native(&self) -> &ObjNative {
+    //     match self.as_obj() {
+    //         ObjType::Native(func) => func,
+    //         _ => panic!("{:?} is not a function objects", self._type),
+    //     }
+    // }
 
     pub fn obj_val(object: ObjType) -> Value {
         Value::new(ValueType::Object(object))
@@ -92,16 +131,16 @@ impl Value {
         }
     }
 
-    fn is_obj(&self) -> bool {
+    pub fn is_obj(&self) -> bool {
         match self._type {
             ValueType::Object(_) => true,
             _ => false,
         }
     }
 
-    fn is_obj_type(&self, _type: &ObjType) -> bool {
-        self.is_obj() && self.as_obj() == _type
-    }
+    // pub fn is_obj_type(&self, _type: &ObjType) -> bool {
+    //     self.is_obj() && (self.as_obj() == _type)
+    // }
 
     pub fn print(&self) {
         match &self._type {
@@ -115,6 +154,11 @@ impl Value {
             ValueType::Number(value) => print!("{}", value),
             ValueType::Object(obj) => match obj {
                 ObjType::String(string) => print!("{}", string.chars),
+                ObjType::Function(func) => match &func.name {
+                    Some(name) => print!("<fn {}>", name.chars),
+                    None => print!("<Script>"),
+                },
+                ObjType::Native(_) => print!("<native fn>"),
             },
             ValueType::None => print!("none"),
         }
@@ -150,7 +194,7 @@ mod tests {
                 len: 0,
                 chars: "mojdfjdnf".to_string(),
             })),
-            Value::number_val(1.2),
+            Value::number_val(0),
             Value::bool_val(true),
             Value::none_val(),
         ];
@@ -169,7 +213,7 @@ mod tests {
                 len: 0,
                 chars: String::new(),
             })),
-            Value::number_val(1.2),
+            Value::number_val(0),
             Value::bool_val(true),
             Value::none_val(),
         ];
@@ -187,7 +231,7 @@ mod tests {
                 len: 0,
                 chars: String::new(),
             })),
-            Value::number_val(1.2),
+            Value::number_val(0),
             Value::bool_val(true),
             Value::none_val(),
         ];
@@ -199,7 +243,7 @@ mod tests {
                 chars: "fdssdfsdfsdf".to_owned(),
             }))
         );
-        assert_eq!(_tests[1], Value::number_val(1.2));
+        assert_eq!(_tests[1], Value::number_val(0));
         assert_eq!(_tests[2], Value::bool_val(true));
         assert_eq!(_tests[3], Value::none_val());
     }

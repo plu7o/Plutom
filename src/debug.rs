@@ -2,17 +2,18 @@ use std::isize;
 
 use crate::chunk::{Chunk, OpCode};
 
-pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
-    println!("== {} ==", name);
-    // (1..chunk.code.len()).fold(0, |offset, _| disassemble_instruction(chunk, offset));
-    let mut offset = 0;
-    while offset < chunk.code.len() {
-        offset = disassemble_instruction(chunk, offset);
-    }
-}
+// pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
+//     println!("== {} ==", name);
+//     // (1..chunk.code.len()).fold(0, |offset, _| disassemble_instruction(chunk, offset));
+//     let mut offset = 0;
+//     while offset < chunk.code.len() {
+//         offset = disassemble_instruction(chunk, offset);
+//     }
+// }
 
 pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     print!("[{:04}] -> ", offset);
+
     if offset > 0 && chunk.get_line(offset) == chunk.get_line(offset - 1) {
         print!("{:3}| ", "");
     } else {
@@ -27,6 +28,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::SetGlobal => constant_op("SET_GLOBAL", &chunk, offset),
         OpCode::GetLocal => byte_op("GET_LOCAL", &chunk, offset),
         OpCode::SetLocal => byte_op("SET_LOCAL", &chunk, offset),
+        OpCode::Call => byte_op("CALL", &chunk, offset),
         OpCode::RETURN => simple_op("RETURN", offset),
         OpCode::NEGATE => simple_op("NEGATE", offset),
         OpCode::ADD => simple_op("ADD", offset),

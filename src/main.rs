@@ -2,6 +2,7 @@ mod chunk;
 mod compiler;
 mod debug;
 mod lexer;
+mod natives;
 mod object;
 mod value;
 mod vm;
@@ -15,7 +16,6 @@ use std::process;
 
 use vm::InterpretResult;
 
-const DEBUG_PRINT_CODE: bool = true;
 const DEBUG_TRACE_EXECUTION: bool = false;
 
 fn main() {

@@ -28,6 +28,7 @@ pub enum OpCode {
     Jump,
     Loop,
     Compare,
+    Call,
 }
 
 impl Into<usize> for OpCode {
@@ -64,11 +65,13 @@ impl From<usize> for OpCode {
             22 => OpCode::Jump,
             23 => OpCode::Loop,
             24 => OpCode::Compare,
+            25 => OpCode::Call,
             _ => panic!("Unkown OpCode"),
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct Chunk {
     pub code: Vec<usize>,
     pub constants: Vec<Value>,
@@ -187,6 +190,9 @@ mod tests {
                 }
                 OpCode::Compare => {
                     assert_eq!(test, 24)
+                }
+                OpCode::Call => {
+                    assert_eq!(test, 25)
                 }
             }
         }

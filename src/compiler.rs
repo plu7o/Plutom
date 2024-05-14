@@ -1,12 +1,8 @@
-use std::{isize, u16, usize};
-
 use crate::{
     chunk::{Chunk, OpCode},
-    debug::disassemble_chunk,
     lexer::{Lexer, Token, TokenType},
-    object::{ObjString, ObjType},
+    object::{ObjFunction, ObjString, ObjType},
     value::{Value, ValueType},
-    DEBUG_PRINT_CODE,
 };
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -34,6 +30,7 @@ enum ParseFn {
     Number,
     String,
     Literal,
+    Call,
 }
 
 struct ParseRule {
@@ -52,64 +49,88 @@ impl ParseRule {
     }
 }
 
+pub struct Parser<'a> {
+    current: Token<'a>,
+    prev: Token<'a>,
+    lexer: Lexer<'a>,
+    had_error: bool,
+    panic_mode: bool,
+    compiler: Box<Compiler<'a>>,
+}
+
 #[derive(Debug, Clone)]
-pub struct Local<'a> {
+struct Local<'a> {
     pub name: Token<'a>,
     pub depth: isize,
 }
 
 #[derive(Debug, Clone)]
+pub enum FunctionType {
+    FunctionBody,
+    Script,
+}
+
+#[derive(Debug, Clone)]
 pub struct Compiler<'a> {
+    enclosing: Option<Box<Compiler<'a>>>,
+    function: ObjFunction,
+    _type: FunctionType,
     locals: Vec<Local<'a>>,
     local_count: usize,
     scope_depth: isize,
 }
 
-impl Compiler<'_> {
-    pub fn init() -> Self {
+impl<'a> Compiler<'a> {
+    pub fn init(compiler: Option<Box<Compiler<'a>>>, _type: FunctionType) -> Self {
         Self {
-            local_count: 0,
+            function: ObjFunction::new(),
+            _type,
+            local_count: 1,
             scope_depth: 0,
-            locals: Vec::new(),
+            locals: vec![Local {
+                depth: 0,
+                name: Token::default(),
+            }],
+            enclosing: compiler,
         }
     }
-}
 
-pub struct Parser<'a> {
-    current: Token<'a>,
-    prev: Token<'a>,
-    lexer: Lexer<'a>,
-    compiler: Compiler<'a>,
-    compile_chunk: &'a mut Chunk,
-    had_error: bool,
-    panic_mode: bool,
+    pub fn compile(&self, source: &'a str) -> Option<ObjFunction> {
+        let lexer = Lexer::init(source);
+        let mut parser = Parser::init(lexer, Box::new(self.clone()));
+
+        parser.had_error = false;
+        parser.panic_mode = false;
+
+        parser.advance();
+
+        while !parser.match_token(TokenType::Eof) {
+            parser.declaration();
+        }
+
+        let function = parser.end_compiler().clone();
+        if parser.had_error {
+            None
+        } else {
+            Some(function)
+        }
+    }
+
+    fn current_chunk(&mut self) -> &mut Chunk {
+        &mut self.function.chunk
+    }
 }
 
 impl<'a> Parser<'a> {
-    pub fn init(lexer: Lexer<'a>, compiler: Compiler<'a>, chunk: &'a mut Chunk) -> Self {
+    pub fn init(lexer: Lexer<'a>, compiler: Box<Compiler<'a>>) -> Self {
         Self {
             current: Token::default(),
             prev: Token::default(),
-            lexer,
-            compiler,
-            compile_chunk: chunk,
             had_error: false,
             panic_mode: false,
+            lexer,
+            compiler,
         }
-    }
-
-    pub fn compile(&mut self) -> bool {
-        self.had_error = false;
-        self.panic_mode = false;
-
-        self.advance();
-
-        while !self.match_token(TokenType::Eof) {
-            self.declaration();
-        }
-
-        self.end_compiler();
-        !self.had_error
     }
 
     // -----------------------------------------------------------
@@ -149,6 +170,7 @@ impl<'a> Parser<'a> {
             ParseFn::Number => self.number(),
             ParseFn::String => self.string(),
             ParseFn::Literal => self.literal(),
+            ParseFn::Call => self.call(can_assign),
         }
     }
 
@@ -163,6 +185,7 @@ impl<'a> Parser<'a> {
         if self.compiler.scope_depth > 0 {
             return 0;
         }
+
         let previous = self.prev;
         self.make_ident_const(&previous)
     }
@@ -218,6 +241,9 @@ impl<'a> Parser<'a> {
     }
 
     fn mark_initialized(&mut self) {
+        if self.compiler.scope_depth == 0 {
+            return;
+        }
         self.compiler.locals[self.compiler.local_count - 1].depth = self.compiler.scope_depth;
     }
 
@@ -246,66 +272,71 @@ impl<'a> Parser<'a> {
         if a.literal.len() != b.literal.len() {
             return false;
         }
+
         a.literal == b.literal && a.literal.len() == b.literal.len()
     }
 
-    //#[rustfmt::skip]
+    #[rustfmt::skip]
     fn get_rule(&mut self, _type: TokenType) -> ParseRule {
         match _type {
-            TokenType::LeftParen => ParseRule::new(Some(ParseFn::Grouping), None, Precedence::NONE),
-            TokenType::RightParen => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::LeftBrace => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::RightBrace => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Comma => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Dot => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Minus => ParseRule::new(
-                Some(ParseFn::Unary),
-                Some(ParseFn::Binary),
-                Precedence::TERM,
-            ),
-            TokenType::Plus => ParseRule::new(None, Some(ParseFn::Binary), Precedence::TERM),
-            TokenType::UnderScore => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Colon => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::SemiColon => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Slash => ParseRule::new(None, Some(ParseFn::Binary), Precedence::FACTOR),
-            TokenType::Star => ParseRule::new(None, Some(ParseFn::Binary), Precedence::FACTOR),
-            TokenType::Dollar => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Bang => ParseRule::new(Some(ParseFn::Unary), None, Precedence::NONE),
-            TokenType::BangEQ => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
-            TokenType::Eq => ParseRule::new(None, None, Precedence::ASSIGNMENT),
-            TokenType::EqEq => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
-            TokenType::Gt => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
-            TokenType::GtEq => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
-            TokenType::Lt => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
-            TokenType::LtEq => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
-            TokenType::Ident => ParseRule::new(Some(ParseFn::Variable), None, Precedence::NONE),
-            TokenType::String => ParseRule::new(Some(ParseFn::String), None, Precedence::NONE),
-            TokenType::Number => ParseRule::new(Some(ParseFn::Number), None, Precedence::NONE),
-            TokenType::And => ParseRule::new(None, Some(ParseFn::And), Precedence::AND),
-            TokenType::Class => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Else => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::False => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
-            TokenType::For => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Fn => ParseRule::new(None, None, Precedence::CALL),
-            TokenType::Arm => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::If => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Match => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::None => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
-            TokenType::Or => ParseRule::new(None, Some(ParseFn::Or), Precedence::OR),
-            TokenType::Echo => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Return => ParseRule::new(None, None, Precedence::PRIMARY),
-            TokenType::Super => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::This => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::True => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
-            TokenType::Let => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::While => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Err => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Eof => ParseRule::new(None, None, Precedence::NONE),
+            //> Calls and Functions infix
+            TokenType::LeftParen    => ParseRule::new(Some(ParseFn::Grouping), Some(ParseFn::Call), Precedence::CALL),
+            //< Calls and Functions infix
+            TokenType::RightParen   => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::LeftBrace    => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::RightBrace   => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Comma        => ParseRule::new(None, None, Precedence::NONE),
+            //> Classes and Instances
+            TokenType::Dot          => ParseRule::new(None, None, Precedence::NONE),
+            //< Classes and Instances
+            TokenType::Minus        => ParseRule::new(Some(ParseFn::Unary), Some(ParseFn::Binary), Precedence::TERM),
+            TokenType::Plus         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::TERM),
+            TokenType::SemiColon    => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Star         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::FACTOR),
+            TokenType::Slash        => ParseRule::new(None, Some(ParseFn::Binary), Precedence::FACTOR),
+            TokenType::UnderScore   => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Dollar       => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Colon        => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Arm          => ParseRule::new(None, None, Precedence::NONE),
+            //> Types of Value
+            TokenType::Bang         => ParseRule::new(Some(ParseFn::Unary), None, Precedence::NONE),
+            //< Types of Value
+            TokenType::BangEQ       => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
+            TokenType::Eq           => ParseRule::new(None, None, Precedence::ASSIGNMENT),
+            TokenType::Or           => ParseRule::new(None, Some(ParseFn::Or), Precedence::OR),
+            TokenType::And          => ParseRule::new(None, Some(ParseFn::And), Precedence::AND),
+            TokenType::EqEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
+            TokenType::Gt           => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
+            TokenType::GtEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
+            TokenType::Lt           => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
+            TokenType::LtEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
+            TokenType::Fn           => ParseRule::new(None, None, Precedence::CALL),
+            TokenType::Return       => ParseRule::new(None, None, Precedence::PRIMARY),
+            TokenType::Ident        => ParseRule::new(Some(ParseFn::Variable), None, Precedence::NONE),
+            TokenType::String       => ParseRule::new(Some(ParseFn::String), None, Precedence::NONE),
+            TokenType::Number       => ParseRule::new(Some(ParseFn::Number), None, Precedence::NONE),
+            TokenType::Class        => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Else         => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::False        => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
+            TokenType::For          => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::If           => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Match        => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::None         => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
+            TokenType::Echo         => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Super        => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::This         => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::True         => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
+            TokenType::Let          => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::While        => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Err          => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Eof          => ParseRule::new(None, None, Precedence::NONE),
         }
     }
 
     fn declaration(&mut self) {
-        if self.match_token(TokenType::Let) {
+        if self.match_token(TokenType::Fn) {
+            self.func_declaration();
+        } else if self.match_token(TokenType::Let) {
             self.var_declaration();
         } else {
             self.statement();
@@ -314,6 +345,13 @@ impl<'a> Parser<'a> {
         if self.panic_mode {
             self.sync();
         }
+    }
+
+    fn func_declaration(&mut self) {
+        let global = self.parse_variable("Expect function name");
+        self.mark_initialized();
+        self.function(FunctionType::FunctionBody);
+        self.define_var(global);
     }
 
     fn var_declaration(&mut self) {
@@ -330,6 +368,69 @@ impl<'a> Parser<'a> {
         self.define_var(global);
     }
 
+    fn function(&mut self, func_type: FunctionType) {
+        let enclosing = &mut self.compiler;
+        self.compiler = Box::new(Compiler::init(Some(enclosing.clone()), func_type.clone()));
+
+        match func_type {
+            FunctionType::Script => (),
+            _ => self.compiler.function.name = Some(ObjString::new(self.prev.literal.to_string())),
+        }
+
+        self.begin_scope();
+
+        self.consume(TokenType::LeftParen, "Expect '(' after function name");
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.compiler.function.arity += 1;
+                if self.compiler.function.arity > 255 {
+                    self.error_at_current("Can't have more than 255 parameters.".to_string());
+                }
+                let constant = self.parse_variable("Expect parameter name.");
+                self.define_var(constant);
+
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(
+            TokenType::RightParen,
+            "Expect ')' after function paramaters",
+        );
+        self.consume(TokenType::LeftBrace, "Expect '{' before funtion body");
+        self.block();
+
+        let function = self.end_compiler();
+        let obj = ObjType::Function(function);
+        let value = self.make_const(Value::obj_val(obj));
+
+        self.emit_bytes(OpCode::CONST as usize, value);
+    }
+
+    fn call(&mut self, _can_assign: bool) {
+        let arg_count = self.arguments_list();
+        self.emit_bytes(OpCode::Call as usize, arg_count);
+    }
+
+    fn arguments_list(&mut self) -> usize {
+        let mut arg_count = 0;
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.expression();
+                if arg_count >= 255 {
+                    self.error("Can't have more than 255 arguments.".to_string());
+                }
+                arg_count += 1;
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after arguments.");
+        arg_count
+    }
+
     fn block(&mut self) {
         while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
             self.declaration();
@@ -342,6 +443,8 @@ impl<'a> Parser<'a> {
             self.echo_stmt();
         } else if self.match_token(TokenType::If) {
             self.if_stmt();
+        } else if self.match_token(TokenType::Return) {
+            self.return_stmt();
         } else if self.match_token(TokenType::Match) {
             self.match_stmt();
         } else if self.match_token(TokenType::While) {
@@ -375,6 +478,21 @@ impl<'a> Parser<'a> {
         self.patch_jump(else_jump);
     }
 
+    fn return_stmt(&mut self) {
+        match self.compiler._type {
+            FunctionType::Script => self.error("Can't return from top-level code.".to_string()),
+            _ => (),
+        }
+
+        if self.match_token(TokenType::SemiColon) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType::SemiColon, "Expected ';' after return value.");
+            self.emit_byte(OpCode::RETURN as usize);
+        }
+    }
+
     fn match_stmt(&mut self) {
         self.expression();
         self.consume(TokenType::LeftBrace, "Expect '{' after match expression");
@@ -400,7 +518,7 @@ impl<'a> Parser<'a> {
     }
 
     fn while_stmt(&mut self) {
-        let loop_start = self.compile_chunk.code.len();
+        let loop_start = self.compiler.current_chunk().code.len();
         self.expression();
         self.consume(TokenType::Colon, "Expect ':' after condition");
 
@@ -423,7 +541,7 @@ impl<'a> Parser<'a> {
         } else {
             self.expression_stmt();
         }
-        let mut loop_start = self.compile_chunk.code.len();
+        let mut loop_start = self.compiler.current_chunk().code.len();
         let mut exit_jump = Option::None;
         if !self.match_token(TokenType::SemiColon) {
             self.expression();
@@ -436,7 +554,7 @@ impl<'a> Parser<'a> {
 
         if !self.match_token(TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump as usize);
-            let increment_start = self.compile_chunk.code.len();
+            let increment_start = self.compiler.current_chunk().code.len();
             self.expression();
             self.emit_byte(OpCode::POP as usize);
             self.consume(TokenType::RightParen, "Expect ')' after for clauses.");
@@ -526,20 +644,20 @@ impl<'a> Parser<'a> {
     }
 
     fn number(&mut self) {
-        let value: f64 = self.prev.literal.parse().unwrap_or(0.0);
+        let value: i64 = self.prev.literal.parse().unwrap_or(0);
         self.emit_const(Value::new(ValueType::Number(value)));
     }
 
     fn string(&mut self) {
+        let chars = self
+            .prev
+            .literal
+            .trim_start_matches("\"")
+            .trim_end_matches("\"");
+
         self.emit_const(Value::obj_val(ObjType::String(ObjString {
-            chars: self
-                .prev
-                .literal
-                .trim_start_matches("\"")
-                .trim_end_matches("\"")
-                .to_string()
-                .clone(),
-            len: self.prev.literal.len().clone(),
+            chars: chars.to_string(),
+            len: chars.len(),
         })));
     }
 
@@ -558,7 +676,7 @@ impl<'a> Parser<'a> {
     }
 
     // -----------------------------------------------------------
-    //                      Compiler Internals
+    //                      compiler.Internals
     // -----------------------------------------------------------
 
     fn advance(&mut self) {
@@ -630,15 +748,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn end_compiler(&mut self) {
-        self.emit_return();
-        if DEBUG_PRINT_CODE {
-            if !self.had_error {
-                disassemble_chunk(self.compile_chunk, "code");
-            }
-        }
-    }
-
     // -----------------------------------------------------------
     //                      Compiling Chunks
     // -----------------------------------------------------------
@@ -656,16 +765,16 @@ impl<'a> Parser<'a> {
     }
 
     fn make_const(&mut self, value: Value) -> usize {
-        let constant = self.compile_chunk.add_const(value).clone();
+        let constant = self.compiler.current_chunk().add_const(value).clone();
         if constant > usize::MAX {
-            self.error("Too many constans in one chunk.".to_string());
+            self.error("Too self.many constans in one chunk.".to_string());
             return 0;
         }
         constant as usize
     }
 
     fn emit_byte(&mut self, byte: usize) {
-        self.compile_chunk.write(byte, self.prev.line);
+        self.compiler.current_chunk().write(byte, self.prev.line);
     }
 
     fn emit_bytes(&mut self, byte_1: usize, byte_2: usize) {
@@ -677,13 +786,13 @@ impl<'a> Parser<'a> {
         self.emit_byte(instruction);
         self.emit_byte(0xff);
         self.emit_byte(0xff);
-        self.compile_chunk.code.len() - 2
+        self.compiler.current_chunk().code.len() - 2
     }
 
     fn emit_loop(&mut self, loop_start: usize) {
         self.emit_byte(OpCode::Loop as usize);
 
-        let offset = self.compile_chunk.code.len() - loop_start + 2;
+        let offset = self.compiler.current_chunk().code.len() - loop_start + 2;
         if offset as u16 > u16::MAX {
             self.error("Loop body too large.".to_string());
         }
@@ -693,9 +802,9 @@ impl<'a> Parser<'a> {
     }
 
     fn patch_jump(&mut self, offset: usize) {
-        let jump = self.compile_chunk.code.len() - offset - 2;
-        self.compile_chunk.code[offset] = (jump >> 8) & 0xff;
-        self.compile_chunk.code[offset + 1] = jump & 0xff;
+        let jump = self.compiler.current_chunk().code.len() - offset - 2;
+        self.compiler.current_chunk().code[offset] = (jump >> 8) & 0xff;
+        self.compiler.current_chunk().code[offset + 1] = jump & 0xff;
     }
 
     fn emit_const(&mut self, value: Value) {
@@ -704,7 +813,17 @@ impl<'a> Parser<'a> {
     }
 
     fn emit_return(&mut self) {
+        self.emit_byte(OpCode::NONE as usize);
         self.emit_byte(OpCode::RETURN as usize);
+    }
+
+    fn end_compiler(&mut self) -> ObjFunction {
+        self.emit_return();
+        let function = self.compiler.function.clone();
+        if self.compiler.enclosing.is_some() {
+            self.compiler = self.compiler.enclosing.clone().unwrap();
+        }
+        function.clone()
     }
 
     // -----------------------------------------------------------
