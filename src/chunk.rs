@@ -77,7 +77,7 @@ impl From<usize> for OpCode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Chunk {
     pub code: Vec<usize>,
     pub constants: Vec<Value>,

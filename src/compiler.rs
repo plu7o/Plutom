@@ -1,8 +1,8 @@
 use crate::{
     chunk::{Chunk, OpCode},
     lexer::{Lexer, Token, TokenType},
-    object::{ObjFunction, ObjString, ObjType},
-    value::{Value, ValueType},
+    object::{ObjFunction, ObjString},
+    value::Value,
 };
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -141,6 +141,22 @@ impl<'a> Parser<'a> {
     //                          Parsing
     // -----------------------------------------------------------
 
+    fn parse(&mut self, rule: ParseFn, can_assign: bool) {
+        match rule {
+            ParseFn::Variable => self.variable(can_assign),
+            ParseFn::Call => self.call(can_assign),
+            ParseFn::Index => self.index(can_assign),
+            ParseFn::And => self.and(),
+            ParseFn::Or => self.or(),
+            ParseFn::Binary => self.binary(),
+            ParseFn::Grouping => self.grouping(),
+            ParseFn::Unary => self.unary(),
+            ParseFn::Number => self.number(),
+            ParseFn::String => self.string(),
+            ParseFn::Literal => self.literal(),
+        }
+    }
+
     fn parse_precedence(&mut self, precedence: Precedence) {
         self.advance();
         let can_assign = precedence <= Precedence::ASSIGNMENT;
@@ -157,25 +173,8 @@ impl<'a> Parser<'a> {
                 self.parse(infix_rule, can_assign);
             }
         }
-
         if can_assign && self.match_token(TokenType::Eq) {
             self.error("Invalid assignment target".to_string());
-        }
-    }
-
-    fn parse(&mut self, rule: ParseFn, can_assign: bool) {
-        match rule {
-            ParseFn::Variable => self.variable(can_assign),
-            ParseFn::And => self.and(),
-            ParseFn::Or => self.or(),
-            ParseFn::Binary => self.binary(),
-            ParseFn::Grouping => self.grouping(),
-            ParseFn::Unary => self.unary(),
-            ParseFn::Number => self.number(),
-            ParseFn::String => self.string(),
-            ParseFn::Literal => self.literal(),
-            ParseFn::Call => self.call(can_assign),
-            ParseFn::Index => self.index(can_assign),
         }
     }
 
@@ -284,18 +283,15 @@ impl<'a> Parser<'a> {
     #[rustfmt::skip]
     fn get_rule(&mut self, _type: TokenType) -> ParseRule {
         match _type {
-            //> Calls and Functions infix
+            TokenType::Eq           => ParseRule::new(None, None, Precedence::ASSIGNMENT),
             TokenType::LeftParen    => ParseRule::new(Some(ParseFn::Grouping), Some(ParseFn::Call), Precedence::CALL),
-            //< Calls and Functions infix
             TokenType::RightParen   => ParseRule::new(None, None, Precedence::NONE),
             TokenType::LeftBrace    => ParseRule::new(None, None, Precedence::NONE),
             TokenType::RightBrace   => ParseRule::new(None, None, Precedence::NONE),
             TokenType::LeftBracket  => ParseRule::new(Some(ParseFn::Literal), Some(ParseFn::Index), Precedence::INDEX),
             TokenType::RightBracket => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Comma        => ParseRule::new(None, None, Precedence::NONE),
-            //> Classes and Instances
             TokenType::Dot          => ParseRule::new(None, None, Precedence::NONE),
-            //< Classes and Instances
             TokenType::Minus        => ParseRule::new(Some(ParseFn::Unary), Some(ParseFn::Binary), Precedence::TERM),
             TokenType::Plus         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::TERM),
             TokenType::SemiColon    => ParseRule::new(None, None, Precedence::NONE),
@@ -305,11 +301,8 @@ impl<'a> Parser<'a> {
             TokenType::Dollar       => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Colon        => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Arm          => ParseRule::new(None, None, Precedence::NONE),
-            //> Types of Value
             TokenType::Bang         => ParseRule::new(Some(ParseFn::Unary), None, Precedence::NONE),
-            //< Types of Value
             TokenType::BangEQ       => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
-            TokenType::Eq           => ParseRule::new(None, None, Precedence::ASSIGNMENT),
             TokenType::Or           => ParseRule::new(None, Some(ParseFn::Or), Precedence::OR),
             TokenType::And          => ParseRule::new(None, Some(ParseFn::And), Precedence::AND),
             TokenType::EqEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
@@ -321,7 +314,8 @@ impl<'a> Parser<'a> {
             TokenType::Return       => ParseRule::new(None, None, Precedence::PRIMARY),
             TokenType::Ident        => ParseRule::new(Some(ParseFn::Variable), None, Precedence::NONE),
             TokenType::String       => ParseRule::new(Some(ParseFn::String), None, Precedence::NONE),
-            TokenType::Number       => ParseRule::new(Some(ParseFn::Number), None, Precedence::NONE),
+            TokenType::Integer      => ParseRule::new(Some(ParseFn::Number), None, Precedence::NONE),
+            TokenType::Float        => ParseRule::new(Some(ParseFn::Number), None, Precedence::NONE),
             TokenType::Class        => ParseRule::new(None, None, Precedence::NONE),
             TokenType::Else         => ParseRule::new(None, None, Precedence::NONE),
             TokenType::False        => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
@@ -409,8 +403,7 @@ impl<'a> Parser<'a> {
         self.block();
 
         let function = self.end_compiler();
-        let obj = ObjType::Function(function);
-        let value = self.make_const(Value::obj_val(obj));
+        let value = self.make_const(Value::function(function));
 
         self.emit_bytes(OpCode::Closure as usize, value);
     }
@@ -625,7 +618,6 @@ impl<'a> Parser<'a> {
         let op_type = self.prev._type;
         let rule = self.get_rule(op_type);
         self.parse_precedence(rule.precedence);
-
         match op_type {
             TokenType::BangEQ => self.emit_bytes(OpCode::EQUAL as usize, OpCode::NOT as usize),
             TokenType::EqEq => self.emit_byte(OpCode::EQUAL as usize),
@@ -649,6 +641,7 @@ impl<'a> Parser<'a> {
     fn unary(&mut self) {
         let op_type = self.prev._type;
         self.parse_precedence(Precedence::UNARY);
+
         match op_type {
             TokenType::Minus => self.emit_byte(OpCode::NEGATE as usize),
             TokenType::Bang => self.emit_byte(OpCode::NOT as usize),
@@ -657,8 +650,18 @@ impl<'a> Parser<'a> {
     }
 
     fn number(&mut self) {
-        let value: i64 = self.prev.literal.parse().unwrap_or(0);
-        self.emit_const(Value::new(ValueType::Number(value)));
+        let op_type = self.prev._type;
+        match op_type {
+            TokenType::Integer => {
+                let value: i64 = self.prev.literal.parse().unwrap_or(0);
+                self.emit_const(Value::int(value));
+            }
+            TokenType::Float => {
+                let value: f64 = self.prev.literal.parse().unwrap_or(0.0);
+                self.emit_const(Value::float(value));
+            }
+            _ => self.error_at_current(format!("{:#?} is not an Integer or Float", op_type)),
+        }
     }
 
     fn string(&mut self) {
@@ -667,16 +670,11 @@ impl<'a> Parser<'a> {
             .literal
             .trim_start_matches("\"")
             .trim_end_matches("\"");
-
-        self.emit_const(Value::obj_val(ObjType::String(ObjString {
-            chars: chars.to_string(),
-            len: chars.len(),
-        })));
+        self.emit_const(Value::string(chars.to_string()));
     }
 
     fn list(&mut self) {
         let mut item_count = 0;
-
         if !self.check(TokenType::RightBracket) {
             loop {
                 self.expression();
@@ -686,9 +684,8 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-
         self.consume(TokenType::RightBracket, "Expect ']' after list values");
-        let value = self.make_const(Value::number_val(item_count));
+        let value = self.make_const(Value::int(item_count));
         self.emit_bytes(OpCode::List as usize, value);
     }
 
@@ -785,15 +782,12 @@ impl<'a> Parser<'a> {
     // -----------------------------------------------------------
 
     fn make_ident_const(&mut self, name: &Token) -> usize {
-        self.make_const(Value::obj_val(ObjType::String(ObjString {
-            len: name.literal.len().clone(),
-            chars: name
-                .literal
+        self.make_const(Value::string(
+            name.literal
                 .trim_start_matches("\"")
                 .trim_end_matches("\"")
-                .to_string()
-                .clone(),
-        })))
+                .to_string(),
+        ))
     }
 
     fn make_const(&mut self, value: Value) -> usize {

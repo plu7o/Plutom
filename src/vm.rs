@@ -5,7 +5,7 @@ use crate::{
     compiler::{Compiler, FunctionType},
     debug::disassemble_instruction,
     natives,
-    object::{ObjClosure, ObjList, ObjNative, ObjString, ObjType},
+    object::{ObjClosure, ObjString, ObjType},
     value::{Value, ValueType},
     DEBUG_TRACE_EXECUTION,
 };
@@ -51,6 +51,7 @@ impl VM {
         vm.define_native("exit", natives::exit_native);
         vm.define_native("sqrt", natives::sqrt_native);
         vm.define_native("pow", natives::pow_native);
+        vm.define_native("type", natives::type_native);
         vm.reset_stack();
         vm
     }
@@ -62,12 +63,11 @@ impl VM {
             None => return InterpretResult::CompileErr("Panic"),
         };
 
-        self.push(Value::obj_val(ObjType::Function(function.clone())));
+        self.push(Value::function(function.clone()));
         let closure = ObjClosure::new(function);
         self.pop();
-        self.push(Value::obj_val(ObjType::Closure(closure.clone())));
+        self.push(Value::closure(closure.clone()));
         self.call(&closure, 0);
-
         self.run()
     }
 
@@ -75,14 +75,61 @@ impl VM {
         let mut frame = self.frames[self.frame_count - 1].to_owned();
 
         macro_rules! binary_op {
-            ($val_type:expr, $op:tt) => {{
-                if !self.peek(0).is_number() || !self.peek(1).is_number() {
-                    self.runtime_error("Operands must be numbers.");
-                    return InterpretResult::RuntimeErr("Operands must be numbers.");
+            ($val_type:expr, $a:expr, $b:expr, $op:tt) => {{
+                self.push($val_type($a $op $b));
+            }};
+        }
+
+        macro_rules! compare_op {
+            ($op:tt) => {{
+                if !self.peek(0).is_int() && !self.peek(0).is_float()
+                    || !self.peek(1).is_int() && !self.peek(1).is_float()
+                {
+                    self.runtime_error(&format!(
+                        "Operands must be Int or Float. Can't do operation on {} {} {}.",
+                        self.peek(0),
+                        stringify!($op),
+                        self.peek(1)
+                    ));
+                    return InterpretResult::RuntimeErr("BinaryOpError");
                 }
-                let b = self.pop().as_number();
-                let a = self.pop().as_number();
-                self.push($val_type(a $op b));
+                let b = self.pop();
+                let a = self.pop();
+                binary_op!(Value::bool, &a, &b, $op);
+            }};
+        }
+
+        macro_rules! term_op {
+            ($op:tt) => {{
+                if !self.peek(0).is_int() && !self.peek(0).is_float()
+                    || !self.peek(1).is_int() && !self.peek(1).is_float()
+                {
+                    self.runtime_error(&format!(
+                        "Operands must be Int or Float. Can't do operation on {} {} {}.",
+                        self.peek(0),
+                        stringify!($op),
+                        self.peek(1)
+                    ));
+                    return InterpretResult::RuntimeErr("BinaryOpError");
+                }
+                let b = self.pop();
+                let a = self.pop();
+
+                match (a.as_object(), b.as_object()) {
+                    (ObjType::Int(val_a), ObjType::Int(val_b)) => {
+                        binary_op!(Value::int, val_a.clone(), val_b.clone(), $op);
+                    }
+                    (ObjType::Int(val_a), ObjType::Float(val_b)) => {
+                        binary_op!(Value::float, val_a.clone(), val_b.clone(), $op);
+                    }
+                    (ObjType::Float(val_a), ObjType::Float(val_b)) => {
+                        binary_op!(Value::float, val_a.clone(), val_b.clone(), $op);
+                    }
+                    (ObjType::Float(val_a), ObjType::Int(val_b)) => {
+                        binary_op!(Value::float, val_a.clone(), val_b.clone(), $op);
+                    }
+                    _ => (),
+                }
             }};
         }
 
@@ -121,14 +168,14 @@ impl VM {
 
             let instruction = read_byte!();
             match OpCode::from(instruction) {
-                OpCode::SUBSTRACT => binary_op!(Value::number_val, -),
-                OpCode::MULTIPLY => binary_op!(Value::number_val, *),
-                OpCode::DIVIDE => binary_op!(Value::number_val, /),
-                OpCode::GREATER => binary_op!(Value::bool_val, >),
-                OpCode::LESS => binary_op!(Value::bool_val, <),
-                OpCode::NONE => self.push(Value::none_val()),
-                OpCode::TRUE => self.push(Value::bool_val(true)),
-                OpCode::FALSE => self.push(Value::bool_val(false)),
+                OpCode::SUBSTRACT => term_op!(-),
+                OpCode::MULTIPLY => term_op!(*),
+                OpCode::DIVIDE => term_op!(/),
+                OpCode::GREATER => compare_op!(>),
+                OpCode::LESS => compare_op!(<),
+                OpCode::NONE => self.push(Value::none()),
+                OpCode::TRUE => self.push(Value::bool(true)),
+                OpCode::FALSE => self.push(Value::bool(false)),
                 OpCode::DefineGlobal => {
                     let name = read_const!();
                     let name = name.as_string();
@@ -149,7 +196,7 @@ impl VM {
                     if self.globals.get(&name).is_some() {
                         self.globals.insert(name, self.peek(0).clone());
                     } else {
-                        self.runtime_error(&format!("Undefined variable  {}", name.chars));
+                        self.runtime_error(&format!("Undefined variable '{}'", name.chars));
                         return InterpretResult::RuntimeErr("VariableError");
                     }
                 }
@@ -182,12 +229,10 @@ impl VM {
                     if self.peek(0).is_string() && self.peek(1).is_string() {
                         self.concatenate()
                     } else if self.peek(0).is_number() && self.peek(1).is_number() {
-                        let a = self.pop().as_number();
-                        let b = self.pop().as_number();
-                        self.push(Value::number_val(a + b))
+                        term_op!(+);
                     } else {
                         self.runtime_error(&format!(
-                            "Operands must be two numbers or two strings, Can't add ({:?}, {:?})",
+                            "Operands must be two numbers or two strings. Can't do operation {} + {}",
                             self.peek(1),
                             self.peek(0)
                         ));
@@ -196,18 +241,14 @@ impl VM {
                 }
                 OpCode::NOT => {
                     let value = self.pop();
-                    self.push(Value::bool_val(self.is_falsy(&value)));
+                    self.push(Value::bool(self.is_falsy(&value)));
                 }
-                OpCode::EQUAL => {
-                    let a: Value = self.pop();
-                    let b: Value = self.pop();
-                    self.push(Value::bool_val(a == b))
-                }
+                OpCode::EQUAL => compare_op!(==),
                 OpCode::Compare => {
                     let a: Value = self.peek(1).clone();
                     let b: Value = self.peek(0).clone();
                     self.pop();
-                    self.push(Value::bool_val(a == b));
+                    self.push(Value::bool(a == b));
                 }
                 OpCode::CONST => {
                     let constant: Value = read_const!();
@@ -221,8 +262,17 @@ impl VM {
                         ));
                         return InterpretResult::RuntimeErr("NegationError");
                     }
-                    let value = -self.pop().as_number();
-                    self.push(Value::number_val(value));
+
+                    let value = self.pop();
+                    match value.as_object() {
+                        ObjType::Int(int) => {
+                            self.push(Value::int(-int.value));
+                        }
+                        ObjType::Float(float) => {
+                            self.push(Value::float(-float.value.raw));
+                        }
+                        _ => (),
+                    }
                 }
                 OpCode::ECHO => {
                     let val = self.pop();
@@ -256,39 +306,32 @@ impl VM {
                 OpCode::Closure => {
                     let function = read_const!();
                     let closure = ObjClosure::new(function.as_function().clone());
-                    self.push(Value::obj_val(ObjType::Closure(closure)));
+                    self.push(Value::closure(closure));
                 }
                 OpCode::List => {
                     let item_count = read_const!();
                     let mut items: Vec<Value> = vec![];
-
-                    for _ in 0..item_count.as_number() {
+                    for _ in 0..item_count.as_int().value {
                         items.push(self.pop().clone());
                     }
-
                     items.reverse();
-                    let list = ObjList::new(items);
-                    self.push(Value::obj_val(ObjType::List(list)));
+                    self.push(Value::list(items));
                 }
                 OpCode::Index => {
                     let index = self.pop();
                     let list = self.pop();
 
                     if !list.is_list() {
-                        self.runtime_error(&format!("Value: {:#?} is not indexable ", list));
+                        self.runtime_error(&format!("Value: {} is not indexable ", list));
+                        return InterpretResult::RuntimeErr("IndexError");
+                    }
+                    if !index.is_int() {
+                        self.runtime_error(&format!("Index Value must be Int but got: {}", index));
                         return InterpretResult::RuntimeErr("IndexError");
                     }
 
-                    if !index.is_number() {
-                        self.runtime_error(&format!(
-                            "Index Value must be a number but got: {:#?}",
-                            index
-                        ));
-                        return InterpretResult::RuntimeErr("IndexError");
-                    }
-                    let num_index = index.as_number();
+                    let num_index = index.as_int().value;
                     let raw_items = list.as_list();
-
                     if num_index >= raw_items.items.len() as i64 {
                         self.runtime_error(&format!(
                             "Index overflow index is {:?} but len is {:?}",
@@ -297,7 +340,6 @@ impl VM {
                         ));
                         return InterpretResult::RuntimeErr("IndexError");
                     }
-
                     if raw_items.items.len() as i64 + num_index < 0 {
                         self.runtime_error(&format!(
                             "Index underflow index is {:?} but len is {:?}",
@@ -306,7 +348,6 @@ impl VM {
                         ));
                         return InterpretResult::RuntimeErr("IndexError");
                     }
-
                     if num_index.is_negative() {
                         let offset = raw_items.items.len() as i64 + num_index;
                         self.push(raw_items.items[offset as usize].clone());
@@ -319,33 +360,34 @@ impl VM {
     }
 
     fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
-        if callee.is_obj() {
-            match callee.as_obj() {
-                ObjType::Closure(closure) => return self.call(closure, arg_count),
-                ObjType::Native(native) => {
-                    let result =
-                        (native.function)(arg_count, &self.stack[self.stack_top - arg_count..]);
+        match callee.as_object() {
+            ObjType::Closure(closure) => return self.call(closure, arg_count),
+            ObjType::Native(native) => {
+                let result =
+                    (native.function)(arg_count, &self.stack[self.stack_top - arg_count..]);
 
-                    match result {
-                        Ok(value) => {
-                            self.stack_top = self.stack_top - (arg_count + 1);
-                            self.stack
-                                .resize(self.stack_top, Value::new(ValueType::None));
-                            self.push(value);
-                            return true;
-                        }
-                        Err(msg) => {
-                            self.runtime_error(&msg);
-                            return false;
-                        }
+                match result {
+                    Ok(value) => {
+                        self.stack_top = self.stack_top - (arg_count + 1);
+                        self.stack
+                            .resize(self.stack_top, Value::new(ValueType::None));
+                        self.push(value);
+                        return true;
+                    }
+                    Err(msg) => {
+                        self.runtime_error(&msg);
+                        return false;
                     }
                 }
-                _ => (), // Non-callable object type
             }
+            _ => {
+                self.runtime_error(&format!(
+                    "{} not callable, can only call Functions and Classes.",
+                    callee
+                ));
+                false
+            } // Non-callable object type
         }
-
-        self.runtime_error("Can only call functions and classes.");
-        false
     }
 
     fn call(&mut self, closure: &ObjClosure, arg_count: usize) -> bool {
@@ -377,10 +419,8 @@ impl VM {
         name: &str,
         function: fn(usize, &[Value]) -> Result<Value, String>,
     ) {
-        self.push(Value::obj_val(ObjType::String(ObjString::new(
-            name.to_string(),
-        ))));
-        self.push(Value::obj_val(ObjType::Native(ObjNative::new(function))));
+        self.push(Value::string(name.to_string()));
+        self.push(Value::native(function));
         self.globals
             .insert(self.stack[0].as_string().clone(), self.stack[1].clone());
         self.pop();
@@ -390,21 +430,16 @@ impl VM {
     fn concatenate(&mut self) {
         let b = self.pop();
         let a = self.pop();
-        let a_string = &a.as_string();
-        let b_string = &b.as_string();
+        let a_string = a.as_string();
+        let b_string = b.as_string();
         let mut chars = String::new();
         chars.push_str(&a_string.chars);
         chars.push_str(&b_string.chars);
-        let length = a_string.len + b_string.len;
-
-        self.push(Value::obj_val(ObjType::String(ObjString {
-            len: length.to_owned(),
-            chars,
-        })));
+        self.push(Value::string(chars));
     }
 
     fn is_falsy(&self, value: &Value) -> bool {
-        value.is_none() || (value.is_bool() && !value.as_bool())
+        value.is_none() || (value.is_bool() && !value.as_bool().value)
     }
 
     fn push(&mut self, value: Value) {

@@ -16,7 +16,7 @@ use std::process;
 
 use vm::InterpretResult;
 
-const DEBUG_TRACE_EXECUTION: bool = true;
+const DEBUG_TRACE_EXECUTION: bool = false;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

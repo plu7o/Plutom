@@ -34,7 +34,8 @@ pub enum TokenType {
     // Literals.
     Ident,
     String,
-    Number,
+    Integer,
+    Float,
 
     // Keywords.
     Let,
@@ -237,11 +238,9 @@ impl<'a> Lexer<'a> {
                     self.line += 1;
                     self.advance();
                 }
-                '/' => {
-                    if self.peek_next() == '/' {
-                        while self.peek() != '\n' && !self.is_at_end() {
-                            self.advance();
-                        }
+                '#' => {
+                    while self.peek() != '\n' && !self.is_at_end() {
+                        self.advance();
                     }
                 }
                 _ => return,
@@ -275,9 +274,10 @@ impl<'a> Lexer<'a> {
             while self.peek().is_digit(10) {
                 self.advance();
             }
+            self.make_token(TokenType::Float)
+        } else {
+            self.make_token(TokenType::Integer)
         }
-
-        self.make_token(TokenType::Number)
     }
 
     fn identifier(&mut self) -> Token<'a> {

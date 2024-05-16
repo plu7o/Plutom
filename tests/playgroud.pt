@@ -1,6 +1,0 @@
-let list = ["moin", 2, true];
-print(list);
-
-
-
-
