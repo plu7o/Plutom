@@ -100,6 +100,14 @@ impl Value {
         }
     }
 
+    pub fn as_mut_object(&mut self) -> &mut ObjType {
+        let val_type = &mut self._type;
+        match val_type {
+            ValueType::Object(obj) => obj,
+            _ => panic!("ValueError: Expected Object but got {:#?}", val_type),
+        }
+    }
+
     pub fn as_bool(&self) -> &ObjBool {
         as_type!(&self._type, ObjType::Bool, "Expected ObjBool")
     }
@@ -130,6 +138,11 @@ impl Value {
 
     pub fn as_list(&self) -> &ObjList {
         as_type!(&self._type, ObjType::List, "Expected ObjList")
+    }
+
+    pub fn as_mut_list(&mut self) -> &mut ObjList {
+        let val_type = &mut self._type;
+        as_type!(val_type, ObjType::List, "Expected Mutable ObjList")
     }
 
     pub fn is_none(&self) -> bool {

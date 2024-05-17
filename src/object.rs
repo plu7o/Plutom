@@ -1,12 +1,14 @@
 use crate::{chunk::Chunk, value::Value};
 use core::fmt;
 use std::{
+    cell::RefCell,
     cmp::Ordering,
     hash::{Hash, Hasher},
     ops::{Add, Div, Mul, Sub},
+    rc::Rc,
 };
 
-pub type NativeFn = fn(usize, &[Value]) -> Result<Value, String>;
+pub type NativeFn = fn(usize, &[Rc<RefCell<Value>>]) -> Result<Value, String>;
 
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
 pub struct Float {
@@ -58,6 +60,7 @@ impl PartialOrd for ObjType {
         match self {
             ObjType::Float(float) => float.partial_cmp(other),
             ObjType::Int(int) => int.partial_cmp(other),
+            ObjType::Str(str) => str.partial_cmp(other),
             _ => None,
         }
     }
@@ -65,23 +68,23 @@ impl PartialOrd for ObjType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ObjString {
-    pub chars: String,
+    pub value: String,
 }
 
 impl ObjString {
     pub fn new(name: String) -> Self {
-        Self { chars: name }
+        Self { value: name }
     }
 
     pub fn print(&self) {
-        print!("{}", self.chars);
+        print!("{}", self.value);
     }
 }
 
 impl Default for ObjString {
     fn default() -> Self {
         Self {
-            chars: String::new(),
+            value: String::new(),
         }
     }
 }
@@ -89,8 +92,23 @@ impl Default for ObjString {
 impl PartialEq<ObjType> for ObjString {
     fn eq(&self, other: &ObjType) -> bool {
         match other {
-            ObjType::Str(string) => string.chars == self.chars,
+            ObjType::Str(string) => string.value == self.value,
             _ => false,
+        }
+    }
+}
+
+impl PartialOrd for ObjString {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.value.partial_cmp(&other.value)
+    }
+}
+
+impl PartialOrd<ObjType> for ObjString {
+    fn partial_cmp(&self, other: &ObjType) -> Option<Ordering> {
+        match other {
+            ObjType::Str(b) => self.value.partial_cmp(&b.value),
+            _ => Some(Ordering::Equal),
         }
     }
 }
@@ -113,7 +131,7 @@ impl ObjFunction {
 
     pub fn print(&self) {
         match &self.name {
-            Some(name) => print!("<fn {}>", name.chars),
+            Some(name) => print!("<fn {}>", name.value),
             None => print!("<Script>"),
         }
     }
@@ -125,7 +143,7 @@ impl PartialEq<ObjType> for ObjFunction {
             ObjType::Function(function) => match &function.name {
                 Some(name) => {
                     if let Some(self_name) = &self.name {
-                        name.chars == self_name.chars
+                        name.value == self_name.value
                     } else {
                         false
                     }
@@ -331,18 +349,31 @@ impl PartialEq for ObjInt {
     }
 }
 
-impl PartialEq<ObjType> for ObjInt {
-    fn eq(&self, other: &ObjType) -> bool {
-        match other {
-            ObjType::Int(int) => int.value == self.value,
-            _ => false,
-        }
-    }
-}
-
 impl PartialOrd for ObjInt {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.value.partial_cmp(&other.value)
+    }
+}
+
+impl PartialEq<ObjFloat> for ObjInt {
+    fn eq(&self, other: &ObjFloat) -> bool {
+        self.value as f64 == other.value.raw
+    }
+}
+
+impl PartialOrd<ObjFloat> for ObjInt {
+    fn partial_cmp(&self, other: &ObjFloat) -> Option<Ordering> {
+        (self.value as f64).partial_cmp(&other.value.raw)
+    }
+}
+
+impl PartialEq<ObjType> for ObjInt {
+    fn eq(&self, other: &ObjType) -> bool {
+        match other {
+            ObjType::Int(b) => self == b,
+            ObjType::Float(b) => self == b,
+            _ => false,
+        }
     }
 }
 
@@ -441,18 +472,30 @@ impl PartialEq for ObjFloat {
     }
 }
 
+impl PartialOrd for ObjFloat {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.value.raw.partial_cmp(&other.value.raw)
+    }
+}
+
+impl PartialEq<ObjInt> for ObjFloat {
+    fn eq(&self, other: &ObjInt) -> bool {
+        self.value.raw == other.value as f64
+    }
+}
+
+impl PartialOrd<ObjInt> for ObjFloat {
+    fn partial_cmp(&self, other: &ObjInt) -> Option<Ordering> {
+        self.value.raw.partial_cmp(&(other.value as f64))
+    }
+}
+
 impl PartialEq<ObjType> for ObjFloat {
     fn eq(&self, other: &ObjType) -> bool {
         match other {
             ObjType::Float(float) => float.value == self.value,
             _ => false,
         }
-    }
-}
-
-impl PartialOrd for ObjFloat {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.value.raw.partial_cmp(&other.value.raw)
     }
 }
 

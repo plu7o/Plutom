@@ -13,11 +13,10 @@ enum Precedence {
     AND,        // and
     EQUALITY,   // == !=
     COMPARISON, // < > <= >=
-    INDEX,      // []
     TERM,       // + -
     FACTOR,     // * /
     UNARY,      // ! -
-    CALL,       // . ()
+    CALL,       // . () []
     PRIMARY,
 }
 
@@ -27,6 +26,7 @@ enum ParseFn {
     And,
     Or,
     Index,
+    Map,
     Binary,
     Grouping,
     Unary,
@@ -146,6 +146,7 @@ impl<'a> Parser<'a> {
             ParseFn::Variable => self.variable(can_assign),
             ParseFn::Call => self.call(can_assign),
             ParseFn::Index => self.index(can_assign),
+            ParseFn::Map => todo!(),
             ParseFn::And => self.and(),
             ParseFn::Or => self.or(),
             ParseFn::Binary => self.binary(),
@@ -219,31 +220,6 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn named_variable(&mut self, name: &Token, can_assign: bool) {
-        let get_op: OpCode;
-        let set_op: OpCode;
-
-        let arg = match self.resolve_local(&name) {
-            Some(arg) => {
-                get_op = OpCode::GetLocal;
-                set_op = OpCode::SetLocal;
-                arg
-            }
-            None => {
-                get_op = OpCode::GetGlobal;
-                set_op = OpCode::SetGlobal;
-                self.make_ident_const(&name)
-            }
-        };
-
-        if can_assign && self.match_token(TokenType::Eq) {
-            self.expression();
-            self.emit_bytes(set_op as usize, arg);
-        } else {
-            self.emit_bytes(get_op as usize, arg);
-        }
-    }
-
     fn mark_initialized(&mut self) {
         if self.compiler.scope_depth == 0 {
             return;
@@ -283,54 +259,54 @@ impl<'a> Parser<'a> {
     #[rustfmt::skip]
     fn get_rule(&mut self, _type: TokenType) -> ParseRule {
         match _type {
-            TokenType::Eq           => ParseRule::new(None, None, Precedence::ASSIGNMENT),
-            TokenType::LeftParen    => ParseRule::new(Some(ParseFn::Grouping), Some(ParseFn::Call), Precedence::CALL),
-            TokenType::RightParen   => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::LeftBrace    => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::RightBrace   => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::LeftBracket  => ParseRule::new(Some(ParseFn::Literal), Some(ParseFn::Index), Precedence::INDEX),
-            TokenType::RightBracket => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Comma        => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Dot          => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Minus        => ParseRule::new(Some(ParseFn::Unary), Some(ParseFn::Binary), Precedence::TERM),
-            TokenType::Plus         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::TERM),
-            TokenType::SemiColon    => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Star         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::FACTOR),
-            TokenType::Slash        => ParseRule::new(None, Some(ParseFn::Binary), Precedence::FACTOR),
-            TokenType::UnderScore   => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Dollar       => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Colon        => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Arm          => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Bang         => ParseRule::new(Some(ParseFn::Unary), None, Precedence::NONE),
-            TokenType::BangEQ       => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
-            TokenType::Or           => ParseRule::new(None, Some(ParseFn::Or), Precedence::OR),
-            TokenType::And          => ParseRule::new(None, Some(ParseFn::And), Precedence::AND),
-            TokenType::EqEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::EQUALITY),
-            TokenType::Gt           => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
-            TokenType::GtEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
-            TokenType::Lt           => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
-            TokenType::LtEq         => ParseRule::new(None, Some(ParseFn::Binary), Precedence::COMPARISON),
-            TokenType::Fn           => ParseRule::new(None, None, Precedence::CALL),
-            TokenType::Return       => ParseRule::new(None, None, Precedence::PRIMARY),
-            TokenType::Ident        => ParseRule::new(Some(ParseFn::Variable), None, Precedence::NONE),
-            TokenType::String       => ParseRule::new(Some(ParseFn::String), None, Precedence::NONE),
-            TokenType::Integer      => ParseRule::new(Some(ParseFn::Number), None, Precedence::NONE),
-            TokenType::Float        => ParseRule::new(Some(ParseFn::Number), None, Precedence::NONE),
-            TokenType::Class        => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Else         => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::False        => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
-            TokenType::For          => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::If           => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Match        => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::None         => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
-            TokenType::Echo         => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Super        => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::This         => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::True         => ParseRule::new(Some(ParseFn::Literal), None, Precedence::NONE),
-            TokenType::Let          => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::While        => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Err          => ParseRule::new(None, None, Precedence::NONE),
-            TokenType::Eof          => ParseRule::new(None, None, Precedence::NONE),
+            TokenType::Eq           => ParseRule::new(None,                    None,                  Precedence::ASSIGNMENT),
+            TokenType::Or           => ParseRule::new(None,                    Some(ParseFn::Or),     Precedence::OR),
+            TokenType::And          => ParseRule::new(None,                    Some(ParseFn::And),    Precedence::AND),
+            TokenType::BangEQ       => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::EQUALITY),
+            TokenType::EqEq         => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::EQUALITY),
+            TokenType::Gt           => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::COMPARISON),
+            TokenType::GtEq         => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::COMPARISON),
+            TokenType::Lt           => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::COMPARISON),
+            TokenType::LtEq         => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::COMPARISON),
+            TokenType::Plus         => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::TERM),
+            TokenType::Minus        => ParseRule::new(Some(ParseFn::Unary),    Some(ParseFn::Binary), Precedence::TERM),
+            TokenType::Star         => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::FACTOR),
+            TokenType::Slash        => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::FACTOR),
+            TokenType::Fn           => ParseRule::new(None,                    None,                  Precedence::CALL),
+            TokenType::LeftParen    => ParseRule::new(Some(ParseFn::Grouping), Some(ParseFn::Call),   Precedence::CALL),
+            TokenType::LeftBrace    => ParseRule::new(Some(ParseFn::Literal),  Some(ParseFn::Map),    Precedence::CALL),
+            TokenType::LeftBracket  => ParseRule::new(Some(ParseFn::Literal),  Some(ParseFn::Index),  Precedence::CALL),
+            TokenType::Return       => ParseRule::new(None,                    None,                  Precedence::PRIMARY),
+            TokenType::Bang         => ParseRule::new(Some(ParseFn::Unary),    None,                  Precedence::NONE),
+            TokenType::Integer      => ParseRule::new(Some(ParseFn::Number),   None,                  Precedence::NONE),
+            TokenType::Float        => ParseRule::new(Some(ParseFn::Number),   None,                  Precedence::NONE),
+            TokenType::String       => ParseRule::new(Some(ParseFn::String),   None,                  Precedence::NONE),
+            TokenType::Ident        => ParseRule::new(Some(ParseFn::Variable), None,                  Precedence::NONE),
+            TokenType::False        => ParseRule::new(Some(ParseFn::Literal),  None,                  Precedence::NONE),
+            TokenType::True         => ParseRule::new(Some(ParseFn::Literal),  None,                  Precedence::NONE),
+            TokenType::None         => ParseRule::new(Some(ParseFn::Literal),  None,                  Precedence::NONE),
+            TokenType::Echo         => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Let          => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Class        => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Dot          => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::This         => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Super        => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::For          => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::While        => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Else         => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::If           => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Match        => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::UnderScore   => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Arm          => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::RightParen   => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::RightBrace   => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::RightBracket => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Colon        => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Comma        => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Dollar       => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::SemiColon    => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Err          => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Eof          => ParseRule::new(None,                    None,                  Precedence::NONE),
         }
     }
 
@@ -608,12 +584,6 @@ impl<'a> Parser<'a> {
         self.patch_jump(end_jump)
     }
 
-    fn index(&mut self, _can_assign: bool) {
-        self.expression();
-        self.consume(TokenType::RightBracket, "Expected ']' after index value.");
-        self.emit_byte(OpCode::Index as usize);
-    }
-
     fn binary(&mut self) {
         let op_type = self.prev._type;
         let rule = self.get_rule(op_type);
@@ -689,9 +659,46 @@ impl<'a> Parser<'a> {
         self.emit_bytes(OpCode::List as usize, value);
     }
 
+    fn index(&mut self, can_assign: bool) {
+        self.expression();
+        self.consume(TokenType::RightBracket, "Expected ']' after index value.");
+
+        if can_assign && self.match_token(TokenType::Eq) {
+            self.expression();
+            return self.emit_byte(OpCode::SetIndex as usize);
+        }
+
+        self.emit_byte(OpCode::GetIndex as usize);
+    }
+
     fn variable(&mut self, can_assign: bool) {
         let mut _previous = self.prev;
         self.named_variable(&_previous, can_assign);
+    }
+
+    fn named_variable(&mut self, name: &Token, can_assign: bool) {
+        let get_op: OpCode;
+        let set_op: OpCode;
+
+        let arg = match self.resolve_local(&name) {
+            Some(arg) => {
+                get_op = OpCode::GetLocal;
+                set_op = OpCode::SetLocal;
+                arg
+            }
+            None => {
+                get_op = OpCode::GetGlobal;
+                set_op = OpCode::SetGlobal;
+                self.make_ident_const(&name)
+            }
+        };
+
+        if can_assign && self.match_token(TokenType::Eq) {
+            self.expression();
+            self.emit_bytes(set_op as usize, arg);
+        } else {
+            self.emit_bytes(get_op as usize, arg);
+        }
     }
 
     fn literal(&mut self) {

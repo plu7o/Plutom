@@ -1,11 +1,15 @@
 ## TODO
 
 # OPERATORS
-- [] assign operators
-- [] ternary operator
+- [] binaryOp assign
+- [] ternary
+- [] Modulo
 
 # Loops
 - [] For In Statements
 
 # Collections
 - [] Map Type
+
+# Reporting
+- [] better Error reporting

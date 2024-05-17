@@ -1,14 +1,24 @@
-use std::{collections::HashMap, fmt::Debug, usize};
-
 use crate::{
     chunk::OpCode,
     compiler::{Compiler, FunctionType},
     debug::disassemble_instruction,
     natives,
     object::{ObjClosure, ObjString, ObjType},
-    value::{Value, ValueType},
+    value::Value,
     DEBUG_TRACE_EXECUTION,
 };
+use core::str;
+use std::{cell::RefCell, char, collections::HashMap, fmt::Debug, rc::Rc, usize};
+
+enum BinaryOps {
+    ADD,
+    SUB,
+    DIV,
+    MUL,
+    LT,
+    GT,
+    EQ,
+}
 
 pub enum InterpretResult<T, E> {
     Ok(T),
@@ -20,15 +30,15 @@ pub enum InterpretResult<T, E> {
 struct CallFrame {
     closure: ObjClosure,
     ip: usize,
-    slots: Vec<Value>,
+    slots: Vec<Rc<RefCell<Value>>>,
 }
 
 pub struct VM {
     frames: Vec<CallFrame>,
     frame_count: usize,
-    stack: Vec<Value>,
+    stack: Vec<Rc<RefCell<Value>>>,
     stack_top: usize,
-    globals: HashMap<ObjString, Value>,
+    globals: HashMap<ObjString, Rc<RefCell<Value>>>,
 }
 
 impl VM {
@@ -74,65 +84,6 @@ impl VM {
     fn run(&mut self) -> InterpretResult<(), &str> {
         let mut frame = self.frames[self.frame_count - 1].to_owned();
 
-        macro_rules! binary_op {
-            ($val_type:expr, $a:expr, $b:expr, $op:tt) => {{
-                self.push($val_type($a $op $b));
-            }};
-        }
-
-        macro_rules! compare_op {
-            ($op:tt) => {{
-                if !self.peek(0).is_int() && !self.peek(0).is_float()
-                    || !self.peek(1).is_int() && !self.peek(1).is_float()
-                {
-                    self.runtime_error(&format!(
-                        "Operands must be Int or Float. Can't do operation on {} {} {}.",
-                        self.peek(0),
-                        stringify!($op),
-                        self.peek(1)
-                    ));
-                    return InterpretResult::RuntimeErr("BinaryOpError");
-                }
-                let b = self.pop();
-                let a = self.pop();
-                binary_op!(Value::bool, &a, &b, $op);
-            }};
-        }
-
-        macro_rules! term_op {
-            ($op:tt) => {{
-                if !self.peek(0).is_int() && !self.peek(0).is_float()
-                    || !self.peek(1).is_int() && !self.peek(1).is_float()
-                {
-                    self.runtime_error(&format!(
-                        "Operands must be Int or Float. Can't do operation on {} {} {}.",
-                        self.peek(0),
-                        stringify!($op),
-                        self.peek(1)
-                    ));
-                    return InterpretResult::RuntimeErr("BinaryOpError");
-                }
-                let b = self.pop();
-                let a = self.pop();
-
-                match (a.as_object(), b.as_object()) {
-                    (ObjType::Int(val_a), ObjType::Int(val_b)) => {
-                        binary_op!(Value::int, val_a.clone(), val_b.clone(), $op);
-                    }
-                    (ObjType::Int(val_a), ObjType::Float(val_b)) => {
-                        binary_op!(Value::float, val_a.clone(), val_b.clone(), $op);
-                    }
-                    (ObjType::Float(val_a), ObjType::Float(val_b)) => {
-                        binary_op!(Value::float, val_a.clone(), val_b.clone(), $op);
-                    }
-                    (ObjType::Float(val_a), ObjType::Int(val_b)) => {
-                        binary_op!(Value::float, val_a.clone(), val_b.clone(), $op);
-                    }
-                    _ => (),
-                }
-            }};
-        }
-
         macro_rules! read_byte {
             () => {{
                 let byte = frame.closure.function.chunk.code[frame.ip];
@@ -155,24 +106,130 @@ impl VM {
             }};
         }
 
+        macro_rules! num_ops {
+            ($val_type:expr, $a:expr, $b:expr, $op:expr) => {{
+                self.pop();
+                self.pop();
+                match $op {
+                    BinaryOps::ADD => self.push($val_type($a + $b)),
+                    BinaryOps::SUB => self.push($val_type($a - $b)),
+                    BinaryOps::DIV => self.push($val_type($a / $b)),
+                    BinaryOps::MUL => self.push($val_type($a * $b)),
+                    BinaryOps::GT => self.push(Value::bool($a > $b)),
+                    BinaryOps::LT => self.push(Value::bool($a < $b)),
+                    BinaryOps::EQ => self.push(Value::bool($a == $b)),
+                }
+            }};
+        }
+
+        macro_rules! binary_op {
+            ($op:expr) => {{
+                let left = self.peek(1);
+                let left = left.as_ref().borrow();
+
+                let right = self.peek(0);
+                let right = right.as_ref().borrow();
+
+                match (left.as_object(), right.as_object()) {
+                    (ObjType::Int(a), ObjType::Int(b)) => {
+                        num_ops!(Value::int, a.clone(), b.clone(), $op);
+                    }
+                    (ObjType::Int(a), ObjType::Float(b)) => {
+                        num_ops!(Value::float, a.clone(), b.clone(), $op);
+                    }
+                    (ObjType::Float(a), ObjType::Float(b)) => {
+                        num_ops!(Value::float, a.clone(), b.clone(), $op);
+                    }
+                    (ObjType::Float(a), ObjType::Int(b)) => {
+                        num_ops!(Value::float, a.clone(), b.clone(), $op);
+                    }
+                    (ObjType::Str(a), ObjType::Str(b)) => match $op {
+                        BinaryOps::ADD => {
+                            self.pop();
+                            self.pop();
+                            let mut value = String::new();
+                            value.push_str(&a.value);
+                            value.push_str(&b.value);
+                            self.push(Value::string(value));
+                        }
+                        BinaryOps::EQ => {
+                            self.pop();
+                            self.pop();
+                            self.push(Value::bool(a.clone() == b.clone()));
+                        }
+                        BinaryOps::LT => {
+                            self.pop();
+                            self.pop();
+                            self.push(Value::bool(a.clone() < b.clone()));
+                        }
+                        BinaryOps::GT => {
+                            self.pop();
+                            self.pop();
+                            self.push(Value::bool(a.clone() > b.clone()));
+                        }
+                        _ => {
+                            self.runtime_error(&format!(
+                                "Can't do operation on Strings {} {} {}.",
+                                left,
+                                stringify!($op),
+                                right
+                            ));
+                            return InterpretResult::RuntimeErr("BinaryOpError");
+                        }
+                    },
+                    (ObjType::Str(string), ObjType::Int(int))
+                    | (ObjType::Int(int), ObjType::Str(string)) => match $op {
+                        BinaryOps::MUL => {
+                            self.pop();
+                            self.pop();
+                            let mut value = String::new();
+                            for _ in 0..int.value {
+                                value.push_str(&string.value);
+                            }
+                            self.push(Value::string(value));
+                        }
+                        _ => {
+                            self.runtime_error(&format!(
+                                "Can't do operation on Strings {} {} {}.",
+                                left,
+                                stringify!($op),
+                                right
+                            ));
+                            return InterpretResult::RuntimeErr("BinaryOpError");
+                        }
+                    },
+                    _ => {
+                        self.runtime_error(&format!(
+                            "Can't do operation {} {} {}.",
+                            left,
+                            stringify!($op),
+                            right
+                        ));
+                        return InterpretResult::RuntimeErr("BinaryOpError");
+                    }
+                }
+            }};
+        }
+
         loop {
             if DEBUG_TRACE_EXECUTION {
                 for slot in self.stack.iter() {
                     print!("[ ");
-                    slot.print();
+                    slot.as_ref().borrow().print();
                     print!(" ]");
                 }
                 println!();
                 disassemble_instruction(&frame.closure.function.chunk, frame.ip);
             }
-
             let instruction = read_byte!();
             match OpCode::from(instruction) {
-                OpCode::SUBSTRACT => term_op!(-),
-                OpCode::MULTIPLY => term_op!(*),
-                OpCode::DIVIDE => term_op!(/),
-                OpCode::GREATER => compare_op!(>),
-                OpCode::LESS => compare_op!(<),
+                OpCode::ADD => binary_op!(BinaryOps::ADD),
+                OpCode::SUBSTRACT => binary_op!(BinaryOps::SUB),
+                OpCode::MULTIPLY => binary_op!(BinaryOps::MUL),
+                OpCode::DIVIDE => binary_op!(BinaryOps::DIV),
+                OpCode::GREATER => binary_op!(BinaryOps::GT),
+                OpCode::LESS => binary_op!(BinaryOps::LT),
+                OpCode::EQUAL => binary_op!(BinaryOps::EQ),
                 OpCode::NONE => self.push(Value::none()),
                 OpCode::TRUE => self.push(Value::bool(true)),
                 OpCode::FALSE => self.push(Value::bool(false)),
@@ -185,9 +242,9 @@ impl VM {
                 OpCode::GetGlobal => {
                     let name = read_const!().as_string().clone();
                     if let Some(value) = self.globals.get(&name) {
-                        self.push(value.clone());
+                        self.push_pointer(value.clone());
                     } else {
-                        self.runtime_error(&format!("Undefined variable '{}'", name.chars));
+                        self.runtime_error(&format!("Undefined variable '{}'", name.value));
                         return InterpretResult::RuntimeErr("VariableError");
                     }
                 }
@@ -196,13 +253,13 @@ impl VM {
                     if self.globals.get(&name).is_some() {
                         self.globals.insert(name, self.peek(0).clone());
                     } else {
-                        self.runtime_error(&format!("Undefined variable '{}'", name.chars));
+                        self.runtime_error(&format!("Undefined variable '{}'", name.value));
                         return InterpretResult::RuntimeErr("VariableError");
                     }
                 }
                 OpCode::GetLocal => {
                     let slot = read_byte!();
-                    self.push(frame.slots[slot].clone());
+                    self.push_pointer(frame.slots[slot].clone());
                 }
                 OpCode::SetLocal => {
                     let slot = read_byte!();
@@ -214,7 +271,7 @@ impl VM {
                 }
                 OpCode::JumpIfFalse => {
                     let offset = read_short!();
-                    if self.is_falsy(self.peek(0)) {
+                    if self.is_falsy(&self.peek(0).as_ref().borrow()) {
                         frame.ip += offset as usize;
                     }
                 }
@@ -225,64 +282,45 @@ impl VM {
                 OpCode::POP => {
                     self.pop();
                 }
-                OpCode::ADD => {
-                    if self.peek(0).is_string() && self.peek(1).is_string() {
-                        self.concatenate()
-                    } else if self.peek(0).is_number() && self.peek(1).is_number() {
-                        term_op!(+);
-                    } else {
-                        self.runtime_error(&format!(
-                            "Operands must be two numbers or two strings. Can't do operation {} + {}",
-                            self.peek(1),
-                            self.peek(0)
-                        ));
-                        return InterpretResult::RuntimeErr("BinaryError");
-                    }
-                }
                 OpCode::NOT => {
                     let value = self.pop();
-                    self.push(Value::bool(self.is_falsy(&value)));
+                    self.push(Value::bool(self.is_falsy(&value.as_ref().borrow())));
                 }
-                OpCode::EQUAL => compare_op!(==),
                 OpCode::Compare => {
-                    let a: Value = self.peek(1).clone();
-                    let b: Value = self.peek(0).clone();
                     self.pop();
-                    self.push(Value::bool(a == b));
+                    self.push(Value::bool(
+                        self.peek(1).as_ref().borrow().as_object()
+                            == self.peek(0).as_ref().borrow().as_object(),
+                    ));
                 }
                 OpCode::CONST => {
                     let constant: Value = read_const!();
                     self.push(constant);
                 }
-                OpCode::NEGATE => {
-                    if !self.peek(0).is_number() {
+                OpCode::NEGATE => match self.pop().as_ref().borrow().as_object() {
+                    ObjType::Int(int) => {
+                        self.push(Value::int(-int.value));
+                    }
+                    ObjType::Float(float) => {
+                        self.push(Value::float(-float.value.raw));
+                    }
+                    _ => {
                         self.runtime_error(&format!(
                             "Operand must be a number. Can't negate {:?}",
                             self.peek(0)
                         ));
                         return InterpretResult::RuntimeErr("NegationError");
                     }
-
-                    let value = self.pop();
-                    match value.as_object() {
-                        ObjType::Int(int) => {
-                            self.push(Value::int(-int.value));
-                        }
-                        ObjType::Float(float) => {
-                            self.push(Value::float(-float.value.raw));
-                        }
-                        _ => (),
-                    }
-                }
+                },
                 OpCode::ECHO => {
                     let val = self.pop();
-                    val.print();
+                    val.as_ref().borrow().print();
                     println!();
                 }
                 OpCode::Call => {
                     let arg_count = read_byte!();
                     self.frames[self.frame_count - 1] = frame.to_owned();
-                    if !self.call_value(self.peek(arg_count).clone(), arg_count) {
+                    if !self.call_value(&self.peek(arg_count).as_ref().borrow(), arg_count) {
                         return InterpretResult::RuntimeErr("CallError");
                     }
                     frame = self.frames[self.frame_count - 1].to_owned();
@@ -299,8 +337,8 @@ impl VM {
 
                     self.stack_top -= frame.slots.len();
                     self.stack
-                        .resize(self.stack_top, Value::new(ValueType::None));
-                    self.push(result);
+                        .resize(self.stack_top, Rc::new(RefCell::new(Value::none())));
+                    self.push_pointer(result);
                     frame = self.frames[self.frame_count - 1].to_owned();
                 }
                 OpCode::Closure => {
@@ -312,54 +350,111 @@ impl VM {
                     let item_count = read_const!();
                     let mut items: Vec<Value> = vec![];
                     for _ in 0..item_count.as_int().value {
-                        items.push(self.pop().clone());
+                        items.push(self.pop().as_ref().borrow().to_owned());
                     }
                     items.reverse();
                     self.push(Value::list(items));
                 }
-                OpCode::Index => {
+                OpCode::GetIndex => {
                     let index = self.pop();
-                    let list = self.pop();
+                    let obj = self.pop();
 
-                    if !list.is_list() {
-                        self.runtime_error(&format!("Value: {} is not indexable ", list));
-                        return InterpretResult::RuntimeErr("IndexError");
-                    }
+                    let index = index.as_ref().borrow();
+                    let getter = obj.as_ref().borrow();
+
                     if !index.is_int() {
                         self.runtime_error(&format!("Index Value must be Int but got: {}", index));
                         return InterpretResult::RuntimeErr("IndexError");
                     }
+                    let index = index.as_int().value;
 
-                    let num_index = index.as_int().value;
-                    let raw_items = list.as_list();
-                    if num_index >= raw_items.items.len() as i64 {
-                        self.runtime_error(&format!(
-                            "Index overflow index is {:?} but len is {:?}",
-                            num_index,
-                            raw_items.items.len()
-                        ));
+                    match getter.as_object() {
+                        ObjType::List(list) => {
+                            match self.check_bounds(&index, &(list.items.len() as i64)) {
+                                Ok(()) => {
+                                    if index.is_negative() {
+                                        let offset = list.items.len() as i64 + index;
+                                        self.push(list.items[offset as usize].clone());
+                                    } else {
+                                        self.push(list.items[index as usize].clone());
+                                    }
+                                }
+                                Err(err) => {
+                                    self.runtime_error(&err);
+                                    return InterpretResult::RuntimeErr("IndexError");
+                                }
+                            }
+                        }
+                        ObjType::Str(str) => {
+                            match self.check_bounds(&index, &(str.value.len() as i64)) {
+                                Ok(()) => {
+                                    if index.is_negative() {
+                                        let offset = str.value.len() as i64 + index;
+                                        let chars: Vec<char> = str.value.chars().collect();
+                                        self.push(Value::string(
+                                            chars[offset as usize].to_string(),
+                                        ));
+                                    } else {
+                                        let chars: Vec<char> = str.value.chars().collect();
+                                        self.push(Value::string(chars[index as usize].to_string()));
+                                    }
+                                }
+                                Err(err) => {
+                                    self.runtime_error(&err);
+                                    return InterpretResult::RuntimeErr("IndexError");
+                                }
+                            }
+                        }
+                        _ => {
+                            self.runtime_error(&format!("Value is not indexable {}", getter));
+                            return InterpretResult::RuntimeErr("IndexError");
+                        }
+                    }
+                }
+                OpCode::SetIndex => {
+                    let value = self.pop();
+                    let index = self.pop();
+                    let obj = self.pop();
+
+                    let setter = value.as_ref().borrow();
+                    let index = index.as_ref().borrow();
+                    let mut getter = obj.as_ref().borrow_mut();
+
+                    if !index.is_int() {
+                        self.runtime_error(&format!("Index Value must be Int but got: {}", index));
                         return InterpretResult::RuntimeErr("IndexError");
                     }
-                    if raw_items.items.len() as i64 + num_index < 0 {
-                        self.runtime_error(&format!(
-                            "Index underflow index is {:?} but len is {:?}",
-                            num_index,
-                            raw_items.items.len()
-                        ));
-                        return InterpretResult::RuntimeErr("IndexError");
-                    }
-                    if num_index.is_negative() {
-                        let offset = raw_items.items.len() as i64 + num_index;
-                        self.push(raw_items.items[offset as usize].clone());
-                    } else {
-                        self.push(raw_items.items[num_index as usize].clone());
+                    let index = index.as_int().value;
+
+                    match getter.as_mut_object() {
+                        ObjType::List(list) => {
+                            match self.check_bounds(&index, &(list.items.len() as i64)) {
+                                Ok(()) => {
+                                    if index.is_negative() {
+                                        let offset = list.items.len() as i64 + index;
+                                        list.items[offset as usize] = setter.to_owned();
+                                    } else {
+                                        list.items[index as usize] = setter.to_owned();
+                                    }
+                                }
+                                Err(err) => {
+                                    self.runtime_error(&err);
+                                    return InterpretResult::RuntimeErr("IndexError");
+                                }
+                            };
+                            self.push(Value::none());
+                        }
+                        _ => {
+                            self.runtime_error(&format!("Value is not indexable {}", getter));
+                            return InterpretResult::RuntimeErr("IndexError");
+                        }
                     }
                 }
             }
         }
     }
 
-    fn call_value(&mut self, callee: Value, arg_count: usize) -> bool {
+    fn call_value(&mut self, callee: &Value, arg_count: usize) -> bool {
         match callee.as_object() {
             ObjType::Closure(closure) => return self.call(closure, arg_count),
             ObjType::Native(native) => {
@@ -370,7 +465,7 @@ impl VM {
                     Ok(value) => {
                         self.stack_top = self.stack_top - (arg_count + 1);
                         self.stack
-                            .resize(self.stack_top, Value::new(ValueType::None));
+                            .resize(self.stack_top, Rc::new(RefCell::new(Value::none())));
                         self.push(value);
                         return true;
                     }
@@ -414,28 +509,38 @@ impl VM {
         true
     }
 
+    fn check_bounds(&self, index: &i64, len: &i64) -> Result<(), String> {
+        // positve index
+        if index >= len {
+            return Err(format!(
+                "Index overflow index is {:?} but len is {:?}",
+                index, len
+            ));
+        }
+
+        // negative index
+        if len + index < 0 {
+            return Err(format!(
+                "Index underflow index is {:?} but len is {:?}",
+                index, len
+            ));
+        }
+        Ok(())
+    }
+
     fn define_native(
         &mut self,
         name: &str,
-        function: fn(usize, &[Value]) -> Result<Value, String>,
+        function: fn(usize, &[Rc<RefCell<Value>>]) -> Result<Value, String>,
     ) {
         self.push(Value::string(name.to_string()));
         self.push(Value::native(function));
-        self.globals
-            .insert(self.stack[0].as_string().clone(), self.stack[1].clone());
+        self.globals.insert(
+            self.stack[0].as_ref().borrow().as_string().clone(),
+            self.stack[1].clone(),
+        );
         self.pop();
         self.pop();
-    }
-
-    fn concatenate(&mut self) {
-        let b = self.pop();
-        let a = self.pop();
-        let a_string = a.as_string();
-        let b_string = b.as_string();
-        let mut chars = String::new();
-        chars.push_str(&a_string.chars);
-        chars.push_str(&b_string.chars);
-        self.push(Value::string(chars));
     }
 
     fn is_falsy(&self, value: &Value) -> bool {
@@ -443,17 +548,22 @@ impl VM {
     }
 
     fn push(&mut self, value: Value) {
+        self.stack.push(Rc::new(RefCell::new(value)));
+        self.stack_top += 1;
+    }
+
+    fn push_pointer(&mut self, value: Rc<RefCell<Value>>) {
         self.stack.push(value);
         self.stack_top += 1;
     }
 
-    fn pop(&mut self) -> Value {
+    fn pop(&mut self) -> Rc<RefCell<Value>> {
         self.stack_top -= 1;
         self.stack.pop().unwrap()
     }
 
-    fn peek(&self, distance: usize) -> &Value {
-        &self.stack[self.stack_top as usize - 1 - distance]
+    fn peek(&self, distance: usize) -> Rc<RefCell<Value>> {
+        self.stack[self.stack_top as usize - 1 - distance].clone()
     }
 
     fn reset_stack(&mut self) {
@@ -474,7 +584,7 @@ impl VM {
             let instruction = frame.ip - function.chunk.code.len() - 1;
             eprint!("[line {}] in ", function.chunk.get_line(instruction));
             if let Some(name) = &function.name {
-                eprintln!("{}()", name.chars);
+                eprintln!("{}()", name.value);
             } else {
                 eprintln!("script");
             }

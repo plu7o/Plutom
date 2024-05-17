@@ -31,7 +31,8 @@ pub enum OpCode {
     Call,
     Closure,
     List,
-    Index,
+    GetIndex,
+    SetIndex,
 }
 
 impl Into<usize> for OpCode {
@@ -71,7 +72,8 @@ impl From<usize> for OpCode {
             25 => OpCode::Call,
             26 => OpCode::Closure,
             27 => OpCode::List,
-            28 => OpCode::Index,
+            28 => OpCode::GetIndex,
+            29 => OpCode::SetIndex,
             _ => panic!("Unkown OpCode"),
         }
     }
