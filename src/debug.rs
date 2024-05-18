@@ -28,6 +28,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::GetGlobal => constant_op("GET_GLOBAL", &chunk, offset),
         OpCode::SetGlobal => constant_op("SET_GLOBAL", &chunk, offset),
         OpCode::List => constant_op("LIST", &chunk, offset),
+        OpCode::Map => constant_op("LIST", &chunk, offset),
         OpCode::GetLocal => byte_op("GET_LOCAL", &chunk, offset),
         OpCode::SetLocal => byte_op("SET_LOCAL", &chunk, offset),
         OpCode::Call => byte_op("CALL", &chunk, offset),

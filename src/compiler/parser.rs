@@ -33,14 +33,13 @@ enum ParseFn {
     Variable,
     And,
     Or,
-    Index,
-    Map,
     Binary,
     Grouping,
     Unary,
     Number,
     String,
     Literal,
+    Index,
     Call,
 }
 
@@ -93,7 +92,6 @@ impl<'a> Parser<'a> {
             ParseFn::Variable => self.variable(can_assign),
             ParseFn::Call => self.call(can_assign),
             ParseFn::Index => self.index(can_assign),
-            ParseFn::Map => self.map(can_assign),
             ParseFn::And => self.and(),
             ParseFn::Or => self.or(),
             ParseFn::Binary => self.binary(),
@@ -126,83 +124,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_variable(&mut self, msg: &str) -> usize {
-        self.consume(TokenType::Ident, msg);
-
-        match self.declare_var() {
-            Err(msg) => self.error(msg),
-            Ok(()) => (),
-        };
-
-        if self.compiler.scope_depth > 0 {
-            return 0;
-        }
-
-        let previous = self.prev;
-        self.make_ident_const(&previous)
-    }
-
-    fn define_var(&mut self, global: usize) {
-        if self.compiler.scope_depth > 0 {
-            self.mark_initialized();
-            return;
-        }
-        self.emit_bytes(OpCode::DefineGlobal as usize, global);
-    }
-
-    fn declare_var(&mut self) -> Result<(), String> {
-        if self.compiler.scope_depth == 0 {
-            return Ok(());
-        }
-        let name = &self.prev;
-        for local in self.compiler.locals.iter().rev() {
-            if local.depth != -1 && local.depth < self.compiler.scope_depth {
-                break;
-            }
-            if self.identifiers_equal(name, &local.name) {
-                return Err("Already a variable with this name in this scope".to_string());
-            }
-        }
-        self.add_local(*name);
-        Ok(())
-    }
-
-    fn mark_initialized(&mut self) {
-        if self.compiler.scope_depth == 0 {
-            return;
-        }
-        self.compiler.locals[self.compiler.local_count - 1].depth = self.compiler.scope_depth;
-    }
-
-    fn add_local(&mut self, name: Token<'a>) {
-        if self.compiler.local_count == usize::MAX {
-            self.error("Too many local variables in function.".to_string());
-            return;
-        }
-        self.compiler.locals.push(Local { name, depth: -1 });
-        self.compiler.local_count += 1;
-    }
-
-    fn resolve_local(&mut self, name: &Token) -> Option<usize> {
-        for (i, local) in self.compiler.locals.iter().enumerate().rev() {
-            if self.identifiers_equal(name, &local.name) {
-                if local.depth == -1 {
-                    self.error("Can't read local variable in its own initializer".to_string());
-                }
-                return Some(i);
-            }
-        }
-        None
-    }
-
-    fn identifiers_equal(&self, a: &Token, b: &Token) -> bool {
-        if a.literal.len() != b.literal.len() {
-            return false;
-        }
-
-        a.literal == b.literal && a.literal.len() == b.literal.len()
-    }
-
     #[rustfmt::skip]
     fn get_rule(&mut self, _type: TokenType) -> ParseRule {
         match _type {
@@ -221,7 +142,7 @@ impl<'a> Parser<'a> {
             TokenType::Slash        => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::FACTOR),
             TokenType::Fn           => ParseRule::new(None,                    None,                  Precedence::CALL),
             TokenType::LeftParen    => ParseRule::new(Some(ParseFn::Grouping), Some(ParseFn::Call),   Precedence::CALL),
-            TokenType::LeftBrace    => ParseRule::new(Some(ParseFn::Literal),  Some(ParseFn::Map),    Precedence::CALL),
+            TokenType::LeftBrace    => ParseRule::new(Some(ParseFn::Literal),  Some(ParseFn::Index), Precedence::CALL),
             TokenType::LeftBracket  => ParseRule::new(Some(ParseFn::Literal),  Some(ParseFn::Index),  Precedence::CALL),
             TokenType::Return       => ParseRule::new(None,                    None,                  Precedence::PRIMARY),
             TokenType::Bang         => ParseRule::new(Some(ParseFn::Unary),    None,                  Precedence::NONE),
@@ -257,6 +178,28 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn statement(&mut self) {
+        if self.match_token(TokenType::Echo) {
+            self.echo_stmt();
+        } else if self.match_token(TokenType::If) {
+            self.if_stmt();
+        } else if self.match_token(TokenType::Return) {
+            self.return_stmt();
+        } else if self.match_token(TokenType::Match) {
+            self.match_stmt();
+        } else if self.match_token(TokenType::While) {
+            self.while_stmt();
+        } else if self.match_token(TokenType::For) {
+            self.for_stmt();
+        } else if self.match_token(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
+        } else {
+            self.expression_stmt()
+        }
+    }
+
     pub fn declaration(&mut self) {
         if self.match_token(TokenType::Fn) {
             self.func_declaration();
@@ -271,12 +214,29 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn func_declaration(&mut self) {
-        let global = self.parse_variable("Expect function name");
-        self.mark_initialized();
-        self.function(FunctionType::FunctionBody);
-        self.define_var(global);
+    fn expression_stmt(&mut self) {
+        self.expression();
+        self.consume(TokenType::SemiColon, "Expected ';' after expression");
+        self.emit_byte(OpCode::POP as usize);
     }
+
+    fn expression(&mut self) {
+        self.parse_precedence(Precedence::ASSIGNMENT);
+    }
+
+    // -----------------------------------------------------------
+    //                          Statements
+    // -----------------------------------------------------------
+
+    fn echo_stmt(&mut self) {
+        self.expression();
+        self.consume(TokenType::SemiColon, "Expected ';' after value");
+        self.emit_byte(OpCode::ECHO as usize);
+    }
+
+    // -----------------------------------------------------------
+    //                          Variables
+    // -----------------------------------------------------------
 
     fn var_declaration(&mut self) {
         let global = self.parse_variable("Expect variable name");
@@ -289,6 +249,121 @@ impl<'a> Parser<'a> {
             TokenType::SemiColon,
             "Expected ';' after variable definition",
         );
+        self.define_var(global);
+    }
+
+    fn parse_variable(&mut self, msg: &str) -> usize {
+        self.consume(TokenType::Ident, msg);
+        match self.declare_var() {
+            Err(msg) => self.error(msg),
+            Ok(()) => (),
+        };
+        if self.compiler.scope_depth > 0 {
+            return 0;
+        }
+        let previous = self.prev;
+        self.make_ident_const(&previous)
+    }
+
+    fn variable(&mut self, can_assign: bool) {
+        let mut _previous = self.prev;
+        self.named_variable(&_previous, can_assign);
+    }
+
+    fn named_variable(&mut self, name: &Token, can_assign: bool) {
+        let get_op: OpCode;
+        let set_op: OpCode;
+
+        let arg = match self.resolve_local(&name) {
+            Some(arg) => {
+                get_op = OpCode::GetLocal;
+                set_op = OpCode::SetLocal;
+                arg
+            }
+            None => {
+                get_op = OpCode::GetGlobal;
+                set_op = OpCode::SetGlobal;
+                self.make_ident_const(&name)
+            }
+        };
+
+        if can_assign && self.match_token(TokenType::Eq) {
+            self.expression();
+            self.emit_bytes(set_op as usize, arg);
+        } else {
+            self.emit_bytes(get_op as usize, arg);
+        }
+    }
+
+    fn declare_var(&mut self) -> Result<(), String> {
+        if self.compiler.scope_depth == 0 {
+            return Ok(());
+        }
+        let name = &self.prev;
+        for local in self.compiler.locals.iter().rev() {
+            if local.depth != -1 && local.depth < self.compiler.scope_depth {
+                break;
+            }
+            if self.identifiers_equal(name, &local.name) {
+                return Err("Already a variable with this name in this scope".to_string());
+            }
+        }
+        self.add_local(*name);
+        Ok(())
+    }
+
+    fn define_var(&mut self, global: usize) {
+        if self.compiler.scope_depth > 0 {
+            self.mark_initialized();
+            return;
+        }
+        self.emit_bytes(OpCode::DefineGlobal as usize, global);
+    }
+
+    fn add_local(&mut self, name: Token<'a>) {
+        if self.compiler.local_count == usize::MAX {
+            self.error("Too many local variables in function.".to_string());
+            return;
+        }
+        self.compiler.locals.push(Local { name, depth: -1 });
+        self.compiler.local_count += 1;
+    }
+
+    fn resolve_local(&mut self, name: &Token) -> Option<usize> {
+        for (i, local) in self.compiler.locals.iter().enumerate().rev() {
+            if self.identifiers_equal(name, &local.name) {
+                if local.depth == -1 {
+                    self.error("Can't read local variable in its own initializer".to_string());
+                }
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn mark_initialized(&mut self) {
+        if self.compiler.scope_depth == 0 {
+            return;
+        }
+        self.compiler.locals[self.compiler.local_count - 1].depth = self.compiler.scope_depth;
+    }
+
+    fn identifiers_equal(&self, a: &Token, b: &Token) -> bool {
+        if a.literal.len() != b.literal.len() {
+            return false;
+        }
+
+        a.literal == b.literal && a.literal.len() == b.literal.len()
+    }
+
+    // -----------------------------------------------------------
+    //                          Functions
+    // -----------------------------------------------------------
+
+    fn func_declaration(&mut self) {
+        let global = self.parse_variable("Expect function name");
+        self.mark_initialized();
+        self.function(FunctionType::FunctionBody);
         self.define_var(global);
     }
 
@@ -354,34 +429,24 @@ impl<'a> Parser<'a> {
         arg_count
     }
 
-    fn block(&mut self) {
-        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
-            self.declaration();
+    fn return_stmt(&mut self) {
+        match self.compiler._type {
+            FunctionType::Script => self.error("Can't return from top-level code.".to_string()),
+            _ => (),
         }
-        self.consume(TokenType::RightBrace, "Expect '}' after block")
+
+        if self.match_token(TokenType::SemiColon) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType::SemiColon, "Expected ';' after return value.");
+            self.emit_byte(OpCode::RETURN as usize);
+        }
     }
 
-    fn statement(&mut self) {
-        if self.match_token(TokenType::Echo) {
-            self.echo_stmt();
-        } else if self.match_token(TokenType::If) {
-            self.if_stmt();
-        } else if self.match_token(TokenType::Return) {
-            self.return_stmt();
-        } else if self.match_token(TokenType::Match) {
-            self.match_stmt();
-        } else if self.match_token(TokenType::While) {
-            self.while_stmt();
-        } else if self.match_token(TokenType::For) {
-            self.for_stmt();
-        } else if self.match_token(TokenType::LeftBrace) {
-            self.begin_scope();
-            self.block();
-            self.end_scope();
-        } else {
-            self.expression_stmt()
-        }
-    }
+    // -----------------------------------------------------------
+    //                      Control Flow
+    // -----------------------------------------------------------
 
     fn if_stmt(&mut self) {
         self.expression();
@@ -399,21 +464,6 @@ impl<'a> Parser<'a> {
             self.statement();
         }
         self.patch_jump(else_jump);
-    }
-
-    fn return_stmt(&mut self) {
-        match self.compiler._type {
-            FunctionType::Script => self.error("Can't return from top-level code.".to_string()),
-            _ => (),
-        }
-
-        if self.match_token(TokenType::SemiColon) {
-            self.emit_return();
-        } else {
-            self.expression();
-            self.consume(TokenType::SemiColon, "Expected ';' after return value.");
-            self.emit_byte(OpCode::RETURN as usize);
-        }
     }
 
     fn match_stmt(&mut self) {
@@ -436,9 +486,12 @@ impl<'a> Parser<'a> {
                 self.statement();
             }
         }
-
         self.consume(TokenType::RightBrace, "Expect '}' after match body");
     }
+
+    // -----------------------------------------------------------
+    //                          Loops
+    // -----------------------------------------------------------
 
     fn while_stmt(&mut self) {
         let loop_start = self.compiler.current_chunk().code.len();
@@ -498,20 +551,15 @@ impl<'a> Parser<'a> {
         self.end_scope();
     }
 
-    fn echo_stmt(&mut self) {
-        self.expression();
-        self.consume(TokenType::SemiColon, "Expected ';' after value");
-        self.emit_byte(OpCode::ECHO as usize);
-    }
+    // -----------------------------------------------------------
+    //                      Expressions
+    // -----------------------------------------------------------
 
-    fn expression_stmt(&mut self) {
-        self.expression();
-        self.consume(TokenType::SemiColon, "Expected ';' after expression");
-        self.emit_byte(OpCode::POP as usize);
-    }
-
-    fn expression(&mut self) {
-        self.parse_precedence(Precedence::ASSIGNMENT);
+    fn block(&mut self) {
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            self.declaration();
+        }
+        self.consume(TokenType::RightBrace, "Expect '}' after block")
     }
 
     fn and(&mut self) {
@@ -520,6 +568,7 @@ impl<'a> Parser<'a> {
         self.parse_precedence(Precedence::AND);
         self.patch_jump(end_jump);
     }
+
     fn or(&mut self) {
         let else_jump = self.emit_jump(OpCode::JumpIfFalse as usize);
         let end_jump = self.emit_jump(OpCode::Jump as usize);
@@ -566,6 +615,22 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn index(&mut self, can_assign: bool) {
+        self.expression();
+        self.consume(TokenType::RightBracket, "Expected ']' after index value.");
+
+        if can_assign && self.match_token(TokenType::Eq) {
+            self.expression();
+            return self.emit_byte(OpCode::SetIndex as usize);
+        }
+
+        self.emit_byte(OpCode::GetIndex as usize);
+    }
+
+    // -----------------------------------------------------------
+    //                          Literals
+    // -----------------------------------------------------------
+
     fn number(&mut self) {
         let op_type = self.prev._type;
         match op_type {
@@ -606,50 +671,22 @@ impl<'a> Parser<'a> {
         self.emit_bytes(OpCode::List as usize, value);
     }
 
-    fn map(&mut self, can_assign: bool) {
-        todo!()
-    }
-
-    fn index(&mut self, can_assign: bool) {
-        self.expression();
-        self.consume(TokenType::RightBracket, "Expected ']' after index value.");
-
-        if can_assign && self.match_token(TokenType::Eq) {
-            self.expression();
-            return self.emit_byte(OpCode::SetIndex as usize);
-        }
-
-        self.emit_byte(OpCode::GetIndex as usize);
-    }
-
-    fn variable(&mut self, can_assign: bool) {
-        let mut _previous = self.prev;
-        self.named_variable(&_previous, can_assign);
-    }
-
-    fn named_variable(&mut self, name: &Token, can_assign: bool) {
-        let get_op: OpCode;
-        let set_op: OpCode;
-
-        let arg = match self.resolve_local(&name) {
-            Some(arg) => {
-                get_op = OpCode::GetLocal;
-                set_op = OpCode::SetLocal;
-                arg
+    fn map(&mut self) {
+        let mut item_count = 0;
+        if !self.check(TokenType::RightBrace) {
+            loop {
+                self.expression();
+                self.consume(TokenType::Colon, "Expect ':' after key");
+                self.expression();
+                item_count += 1;
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
             }
-            None => {
-                get_op = OpCode::GetGlobal;
-                set_op = OpCode::SetGlobal;
-                self.make_ident_const(&name)
-            }
-        };
-
-        if can_assign && self.match_token(TokenType::Eq) {
-            self.expression();
-            self.emit_bytes(set_op as usize, arg);
-        } else {
-            self.emit_bytes(get_op as usize, arg);
         }
+        self.consume(TokenType::RightBrace, "Expect '}' after key:value pairs");
+        let value = self.make_const(Value::int(item_count));
+        self.emit_bytes(OpCode::Map as usize, value);
     }
 
     fn literal(&mut self) {
@@ -658,12 +695,13 @@ impl<'a> Parser<'a> {
             TokenType::True => self.emit_byte(OpCode::TRUE as usize),
             TokenType::None => self.emit_byte(OpCode::NONE as usize),
             TokenType::LeftBracket => self.list(),
+            TokenType::LeftBrace => self.map(),
             _ => self.error_at_current(format!("{:#?} is not a literal", self.prev._type)),
         };
     }
 
     // -----------------------------------------------------------
-    //                      compiler.Internals
+    //                          Utils
     // -----------------------------------------------------------
 
     pub fn advance(&mut self) {
@@ -697,28 +735,9 @@ impl<'a> Parser<'a> {
         self.current._type == _type
     }
 
-    fn sync(&mut self) {
-        self.panic_mode = false;
-
-        while self.current._type != TokenType::Eof {
-            if self.prev._type == TokenType::SemiColon {
-                return;
-            }
-
-            match self.current._type {
-                TokenType::Class
-                | TokenType::Fn
-                | TokenType::Let
-                | TokenType::For
-                | TokenType::While
-                | TokenType::Echo
-                | TokenType::Return => return,
-                _ => (),
-            }
-
-            self.advance();
-        }
-    }
+    // -----------------------------------------------------------
+    //                      Scoping
+    // -----------------------------------------------------------
 
     fn begin_scope(&mut self) {
         self.compiler.scope_depth += 1;
@@ -736,7 +755,7 @@ impl<'a> Parser<'a> {
     }
 
     // -----------------------------------------------------------
-    //                      Compiling Chunks
+    //                      Instructions
     // -----------------------------------------------------------
 
     fn make_ident_const(&mut self, name: &Token) -> usize {
@@ -816,6 +835,29 @@ impl<'a> Parser<'a> {
     //                          Errors
     // -----------------------------------------------------------
 
+    fn sync(&mut self) {
+        self.panic_mode = false;
+
+        while self.current._type != TokenType::Eof {
+            if self.prev._type == TokenType::SemiColon {
+                return;
+            }
+
+            match self.current._type {
+                TokenType::Class
+                | TokenType::Fn
+                | TokenType::Let
+                | TokenType::For
+                | TokenType::While
+                | TokenType::Echo
+                | TokenType::Return => return,
+                _ => (),
+            }
+
+            self.advance();
+        }
+    }
+
     fn error_at_current(&mut self, msg: String) {
         let current = self.current;
         self.error_at(&current, &msg);
@@ -831,28 +873,23 @@ impl<'a> Parser<'a> {
             return;
         }
         self.panic_mode = true;
-
         match token._type {
             TokenType::Eof => error::report_error(
                 &self.source,
                 &format!("{} at end.", msg),
-                token.location,
-                false,
+                self.prev.location,
             ),
             TokenType::Err => error::report_error(
                 &self.source,
                 &format!("{} at unkonw token.", msg),
                 token.location,
-                false,
             ),
             _ => error::report_error(
                 &self.source,
                 &format!("{} at '{}'.", msg, token.literal),
                 token.location,
-                false,
             ),
         }
-
         self.had_error = true;
     }
 }

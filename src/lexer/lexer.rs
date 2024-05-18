@@ -9,6 +9,7 @@ pub struct Lexer<'a> {
     start: usize,
     current: usize,
     line: usize,
+    line_start: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -18,6 +19,7 @@ impl<'a> Lexer<'a> {
             start: 0,
             current: 0,
             line: 1,
+            line_start: 0,
         }
     }
 
@@ -133,7 +135,7 @@ impl<'a> Lexer<'a> {
             &self.source[self.start..self.current],
             Loc {
                 row: self.line,
-                col: self.start,
+                col: self.start - self.line_start + 1,
                 len: self.current - self.start,
             },
         )
@@ -145,7 +147,7 @@ impl<'a> Lexer<'a> {
             msg,
             Loc {
                 row: self.line,
-                col: self.start,
+                col: self.start - self.line_start + 1,
                 len: self.current - self.start,
             },
         )
@@ -160,6 +162,7 @@ impl<'a> Lexer<'a> {
                 }
                 '\n' => {
                     self.line += 1;
+                    self.line_start = self.current;
                     self.advance();
                 }
                 '#' => {
@@ -176,6 +179,7 @@ impl<'a> Lexer<'a> {
         while self.peek() != '"' && !self.is_at_end() {
             if self.peek() == '\n' {
                 self.line += 1;
+                self.line_start = self.line_start + 1;
             }
             self.advance();
         }

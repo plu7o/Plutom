@@ -1,2 +1,7 @@
-let i = 1;
-print("a" - "a");
+let map = { 
+    1+1: 1,
+    "key2": 2,
+    "key3": 3
+};
+
+print(map[1]);

@@ -359,6 +359,32 @@ impl VM {
                     items.reverse();
                     self.push(Value::list(items));
                 }
+                OpCode::Map => {
+                    let item_count = read_const!();
+                    let mut dict: HashMap<Value, Value> = HashMap::new();
+                    for _ in 0..item_count.as_int().value {
+                        let value = self.pop();
+                        let key = self.pop();
+                        let value = value.as_ref().borrow();
+                        let key = key.as_ref().borrow();
+
+                        match key.as_object() {
+                            ObjType::Int(_)
+                            | ObjType::Float(_)
+                            | ObjType::Str(_)
+                            | ObjType::Bool(_) => {
+                                dict.insert(key.to_owned(), value.to_owned());
+                            }
+                            _ => {
+                                self.runtime_error(&format!(
+                                    "Key Value must be Literal but got: {}",
+                                    key
+                                ));
+                                return InterpretResult::RuntimeErr("IndexError");
+                            }
+                        };
+                    }
+                }
                 OpCode::GetIndex => {
                     let index = self.pop();
                     let obj = self.pop();
@@ -580,21 +606,16 @@ impl VM {
         let frame = &self.frames[self.frame_count - 1];
         let instruction = frame.ip;
         let location = frame.closure.function.chunk.get_location(instruction);
-        error::report_error(&self.source, format, location, false);
+        error::report_error(&self.source, format, location);
         for i in (0..self.frame_count).rev() {
             let frame = &self.frames[i];
             let function = &frame.closure.function;
             let instruction = frame.ip;
             let location = function.chunk.get_location(instruction);
             if let Some(name) = &function.name {
-                error::report_error(
-                    &self.source,
-                    &format!("in {}()", name.value),
-                    location,
-                    false,
-                );
+                error::report_error(&self.source, &format!("in {}()", name.value), location);
             } else {
-                error::report_error(&self.source, "in script", location, true);
+                error::report_error(&self.source, "in script", location);
             }
         }
         self.reset_stack();
