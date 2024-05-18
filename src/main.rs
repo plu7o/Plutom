@@ -1,9 +1,9 @@
-mod chunk;
 mod compiler;
 mod debug;
+mod error;
 mod lexer;
-mod natives;
-mod object;
+mod objects;
+mod stdlib;
 mod value;
 mod vm;
 
@@ -16,7 +16,7 @@ use std::process;
 
 use vm::InterpretResult;
 
-const DEBUG_TRACE_EXECUTION: bool = true;
+const DEBUG_TRACE_EXECUTION: bool = false;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -32,18 +32,15 @@ fn main() {
 
 fn repl() {
     let mut vm = vm::VM::init();
-
-    const PROMPT: &str = "PlutomV0.01 >> ";
-    let mut input = String::new();
+    let prompt = "PlutomV0.01 >> ";
     loop {
-        print!("{}", PROMPT);
+        let mut input = String::new();
+        print!("{}", prompt);
         io::stdout().flush().unwrap();
-
         io::stdin()
             .read_line(&mut input)
             .expect("InputError: Failed reading input.");
-        vm.interpret(&input.trim());
-        input.clear();
+        vm.interpret(input);
     }
 }
 
@@ -55,9 +52,8 @@ fn run_file(path: &str) {
             process::exit(74);
         }
     };
-
     let mut vm = vm::VM::init();
-    let result = vm.interpret(&source.trim());
+    let result = vm.interpret(source);
     match result {
         InterpretResult::CompileErr(msg) => {
             println!("CompileError: {:?}.", msg);

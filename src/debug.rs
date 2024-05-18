@@ -1,6 +1,6 @@
 use std::isize;
 
-use crate::chunk::{Chunk, OpCode};
+use crate::compiler::chunk::{Chunk, OpCode};
 
 #[allow(dead_code)]
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
@@ -15,10 +15,10 @@ pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
 pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     print!("[{:04}] -> ", offset);
 
-    if offset > 0 && chunk.get_line(offset) == chunk.get_line(offset - 1) {
+    if offset > 0 && chunk.get_location(offset).row == chunk.get_location(offset - 1).row {
         print!("{:3}| ", "");
     } else {
-        print!("{:4} ", chunk.get_line(offset));
+        print!("{:4} ", chunk.get_location(offset));
     }
 
     let instruction = chunk.code[offset];

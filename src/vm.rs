@@ -1,9 +1,10 @@
 use crate::{
-    chunk::OpCode,
-    compiler::{Compiler, FunctionType},
+    compiler::chunk::OpCode,
+    compiler::compiler::{Compiler, FunctionType},
     debug::disassemble_instruction,
-    natives,
-    object::{ObjClosure, ObjString, ObjType},
+    error,
+    objects::object::{ObjClosure, ObjString, ObjType},
+    stdlib::natives,
     value::Value,
     DEBUG_TRACE_EXECUTION,
 };
@@ -39,6 +40,7 @@ pub struct VM {
     stack: Vec<Rc<RefCell<Value>>>,
     stack_top: usize,
     globals: HashMap<ObjString, Rc<RefCell<Value>>>,
+    source: String,
 }
 
 impl VM {
@@ -49,6 +51,7 @@ impl VM {
             stack: Vec::new(),
             stack_top: 0,
             globals: HashMap::new(),
+            source: String::new(),
         }
     }
 
@@ -66,13 +69,14 @@ impl VM {
         vm
     }
 
-    pub fn interpret(&mut self, source: &str) -> InterpretResult<(), &str> {
+    pub fn interpret(&mut self, source: String) -> InterpretResult<(), &str> {
         let mut compiler = Compiler::init(None, FunctionType::Script);
-        let function = match Compiler::compile(&mut compiler, source) {
+        let function = match Compiler::compile(&mut compiler, &source) {
             Some(function) => function,
-            None => return InterpretResult::CompileErr("Panic"),
+            None => return InterpretResult::CompileErr("Panic!"),
         };
 
+        self.source = source;
         self.push(Value::function(function.clone()));
         let closure = ObjClosure::new(function);
         self.pop();
@@ -169,7 +173,7 @@ impl VM {
                         }
                         _ => {
                             self.runtime_error(&format!(
-                                "Can't do operation on Strings {} {} {}.",
+                                "Operation not supported on Strings -> {} {} {}.",
                                 left,
                                 stringify!($op),
                                 right
@@ -190,7 +194,7 @@ impl VM {
                         }
                         _ => {
                             self.runtime_error(&format!(
-                                "Can't do operation on Strings {} {} {}.",
+                                "Operation not supported on Strings -> {} {} {}.",
                                 left,
                                 stringify!($op),
                                 right
@@ -200,7 +204,7 @@ impl VM {
                     },
                     _ => {
                         self.runtime_error(&format!(
-                            "Can't do operation {} {} {}.",
+                            "Operation not supported -> {} {} {}.",
                             left,
                             stringify!($op),
                             right
@@ -575,21 +579,24 @@ impl VM {
     fn runtime_error(&mut self, format: &str) {
         let frame = &self.frames[self.frame_count - 1];
         let instruction = frame.ip;
-        let line = frame.closure.function.chunk.get_line(instruction);
-        println!("[Line {}] {}", line, format);
-
-        for i in (0..self.frame_count - 1).rev() {
+        let location = frame.closure.function.chunk.get_location(instruction);
+        error::report_error(&self.source, format, location, false);
+        for i in (0..self.frame_count).rev() {
             let frame = &self.frames[i];
             let function = &frame.closure.function;
-            let instruction = frame.ip - function.chunk.code.len() - 1;
-            eprint!("[line {}] in ", function.chunk.get_line(instruction));
+            let instruction = frame.ip;
+            let location = function.chunk.get_location(instruction);
             if let Some(name) = &function.name {
-                eprintln!("{}()", name.value);
+                error::report_error(
+                    &self.source,
+                    &format!("in {}()", name.value),
+                    location,
+                    false,
+                );
             } else {
-                eprintln!("script");
+                error::report_error(&self.source, "in script", location, true);
             }
         }
-
         self.reset_stack();
     }
 }

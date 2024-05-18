@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::object::{
+use crate::objects::object::{
     NativeFn, ObjBool, ObjClosure, ObjFloat, ObjFunction, ObjInt, ObjList, ObjNative, ObjString,
     ObjType,
 };
@@ -214,7 +214,19 @@ impl Value {
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#?}", self)
+        match &self._type {
+            ValueType::Object(object) => match object {
+                ObjType::Bool(bool) => write!(f, "Bool({})", bool.value),
+                ObjType::Int(int) => write!(f, "Int({})", int.value),
+                ObjType::Float(float) => write!(f, "Float({})", float.value.raw),
+                ObjType::Str(string) => write!(f, "String({})", string.value),
+                ObjType::Function(func) => write!(f, "{}", func),
+                ObjType::Native(_) => write!(f, "<NativeFn>"),
+                ObjType::Closure(_) => write!(f, "<Closure>"),
+                ObjType::List(list) => write!(f, "List({:#?})", list.items),
+            },
+            ValueType::None => write!(f, "None"),
+        }
     }
 }
 

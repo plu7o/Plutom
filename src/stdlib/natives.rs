@@ -6,7 +6,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::{object::ObjType, value::Value};
+use crate::{objects::object::ObjType, value::Value};
 
 pub fn type_native(arg_count: usize, args: &[Rc<RefCell<Value>>]) -> Result<Value, String> {
     if arg_count != 1 {

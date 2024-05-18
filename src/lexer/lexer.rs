@@ -1,91 +1,7 @@
+use crate::lexer::token::{Token, TokenType};
 use std::{char, usize};
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum TokenType {
-    // Single-character tokens.
-    LeftParen,
-    RightParen,
-    LeftBrace,
-    RightBrace,
-    LeftBracket,
-    RightBracket,
-    Comma,
-    Dot,
-    Minus,
-    Plus,
-    Colon,
-    SemiColon,
-    Slash,
-    Star,
-    Dollar,
-    UnderScore,
-
-    // One or two character tokens.
-    Bang,
-    BangEQ,
-    Eq,
-    EqEq,
-    Gt,
-    GtEq,
-    Lt,
-    LtEq,
-    Arm,
-
-    // Literals.
-    Ident,
-    String,
-    Integer,
-    Float,
-
-    // Keywords.
-    Let,
-    And,
-    Or,
-    False,
-    True,
-    If,
-    Else,
-    While,
-    For,
-    Fn,
-    None,
-    Echo,
-    Return,
-    Class,
-    Super,
-    This,
-    Match,
-
-    Err,
-    Eof,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Token<'a> {
-    pub _type: TokenType,
-    pub literal: &'a str,
-    pub line: usize,
-}
-
-impl<'a> Token<'a> {
-    pub fn new(_type: TokenType, literal: &'a str, line: usize) -> Self {
-        Self {
-            _type,
-            literal,
-            line,
-        }
-    }
-}
-
-impl Default for Token<'_> {
-    fn default() -> Self {
-        Self {
-            _type: TokenType::None,
-            literal: "",
-            line: 0,
-        }
-    }
-}
+use super::token::Loc;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Lexer<'a> {
@@ -211,20 +127,28 @@ impl<'a> Lexer<'a> {
         true
     }
 
-    fn is_at_end(&self) -> bool {
-        self.get(self.current) == '\0'
-    }
-
     fn make_token(&self, token_type: TokenType) -> Token<'a> {
         Token::new(
             token_type,
             &self.source[self.start..self.current],
-            self.line.clone(),
+            Loc {
+                row: self.line,
+                col: self.start,
+                len: self.current - self.start,
+            },
         )
     }
 
     fn error_token(&self, msg: &'a str) -> Token<'a> {
-        Token::new(TokenType::Err, msg, self.line)
+        Token::new(
+            TokenType::Err,
+            msg,
+            Loc {
+                row: self.line,
+                col: self.start,
+                len: self.current - self.start,
+            },
+        )
     }
 
     fn skip_whitespace(&mut self) {
@@ -338,5 +262,9 @@ impl<'a> Lexer<'a> {
             return _type;
         }
         TokenType::Ident
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.get(self.current) == '\0'
     }
 }

@@ -1,8 +1,16 @@
 use crate::{
-    chunk::{Chunk, OpCode},
-    lexer::{Lexer, Token, TokenType},
-    object::{ObjFunction, ObjString},
+    error,
+    lexer::{
+        lexer::Lexer,
+        token::{Token, TokenType},
+    },
+    objects::object::{ObjFunction, ObjString},
     value::Value,
+};
+
+use super::{
+    chunk::OpCode,
+    compiler::{Compiler, FunctionType, Local},
 };
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -57,76 +65,14 @@ pub struct Parser<'a> {
     current: Token<'a>,
     prev: Token<'a>,
     lexer: Lexer<'a>,
-    had_error: bool,
-    panic_mode: bool,
+    pub had_error: bool,
+    pub panic_mode: bool,
     compiler: Box<Compiler<'a>>,
-}
-
-#[derive(Debug, Clone)]
-struct Local<'a> {
-    pub name: Token<'a>,
-    pub depth: isize,
-}
-
-#[derive(Debug, Clone)]
-pub enum FunctionType {
-    FunctionBody,
-    Script,
-}
-
-#[derive(Debug, Clone)]
-pub struct Compiler<'a> {
-    enclosing: Option<Box<Compiler<'a>>>,
-    function: ObjFunction,
-    _type: FunctionType,
-    locals: Vec<Local<'a>>,
-    local_count: usize,
-    scope_depth: isize,
-}
-
-impl<'a> Compiler<'a> {
-    pub fn init(compiler: Option<Box<Compiler<'a>>>, _type: FunctionType) -> Self {
-        Self {
-            function: ObjFunction::new(),
-            _type,
-            local_count: 1,
-            scope_depth: 0,
-            locals: vec![Local {
-                depth: 0,
-                name: Token::default(),
-            }],
-            enclosing: compiler,
-        }
-    }
-
-    pub fn compile(&self, source: &'a str) -> Option<ObjFunction> {
-        let lexer = Lexer::init(source);
-        let mut parser = Parser::init(lexer, Box::new(self.clone()));
-
-        parser.had_error = false;
-        parser.panic_mode = false;
-
-        parser.advance();
-
-        while !parser.match_token(TokenType::Eof) {
-            parser.declaration();
-        }
-
-        let function = parser.end_compiler().clone();
-        if parser.had_error {
-            None
-        } else {
-            Some(function)
-        }
-    }
-
-    fn current_chunk(&mut self) -> &mut Chunk {
-        &mut self.function.chunk
-    }
+    source: &'a str,
 }
 
 impl<'a> Parser<'a> {
-    pub fn init(lexer: Lexer<'a>, compiler: Box<Compiler<'a>>) -> Self {
+    pub fn init(source: &'a str, lexer: Lexer<'a>, compiler: Box<Compiler<'a>>) -> Self {
         Self {
             current: Token::default(),
             prev: Token::default(),
@@ -134,6 +80,7 @@ impl<'a> Parser<'a> {
             panic_mode: false,
             lexer,
             compiler,
+            source,
         }
     }
 
@@ -146,7 +93,7 @@ impl<'a> Parser<'a> {
             ParseFn::Variable => self.variable(can_assign),
             ParseFn::Call => self.call(can_assign),
             ParseFn::Index => self.index(can_assign),
-            ParseFn::Map => todo!(),
+            ParseFn::Map => self.map(can_assign),
             ParseFn::And => self.and(),
             ParseFn::Or => self.or(),
             ParseFn::Binary => self.binary(),
@@ -310,7 +257,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn declaration(&mut self) {
+    pub fn declaration(&mut self) {
         if self.match_token(TokenType::Fn) {
             self.func_declaration();
         } else if self.match_token(TokenType::Let) {
@@ -659,6 +606,10 @@ impl<'a> Parser<'a> {
         self.emit_bytes(OpCode::List as usize, value);
     }
 
+    fn map(&mut self, can_assign: bool) {
+        todo!()
+    }
+
     fn index(&mut self, can_assign: bool) {
         self.expression();
         self.consume(TokenType::RightBracket, "Expected ']' after index value.");
@@ -715,7 +666,7 @@ impl<'a> Parser<'a> {
     //                      compiler.Internals
     // -----------------------------------------------------------
 
-    fn advance(&mut self) {
+    pub fn advance(&mut self) {
         self.prev = self.current;
         loop {
             self.current = self.lexer.scan_token();
@@ -734,7 +685,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn match_token(&mut self, _type: TokenType) -> bool {
+    pub fn match_token(&mut self, _type: TokenType) -> bool {
         if !self.check(_type) {
             return false;
         }
@@ -807,7 +758,9 @@ impl<'a> Parser<'a> {
     }
 
     fn emit_byte(&mut self, byte: usize) {
-        self.compiler.current_chunk().write(byte, self.prev.line);
+        self.compiler
+            .current_chunk()
+            .write(byte, self.prev.location);
     }
 
     fn emit_bytes(&mut self, byte_1: usize, byte_2: usize) {
@@ -850,7 +803,7 @@ impl<'a> Parser<'a> {
         self.emit_byte(OpCode::RETURN as usize);
     }
 
-    fn end_compiler(&mut self) -> ObjFunction {
+    pub fn end_compiler(&mut self) -> ObjFunction {
         self.emit_return();
         let function = self.compiler.function.clone();
         if self.compiler.enclosing.is_some() {
@@ -879,13 +832,27 @@ impl<'a> Parser<'a> {
         }
         self.panic_mode = true;
 
-        print!("[line {}] Error", token.line);
         match token._type {
-            TokenType::Eof => print!(" at end"),
-            TokenType::Err => (),
-            _ => print!(" at '{}' ", token.literal),
+            TokenType::Eof => error::report_error(
+                &self.source,
+                &format!("{} at end.", msg),
+                token.location,
+                false,
+            ),
+            TokenType::Err => error::report_error(
+                &self.source,
+                &format!("{} at unkonw token.", msg),
+                token.location,
+                false,
+            ),
+            _ => error::report_error(
+                &self.source,
+                &format!("{} at '{}'.", msg, token.literal),
+                token.location,
+                false,
+            ),
         }
-        println!(": {}", msg);
+
         self.had_error = true;
     }
 }

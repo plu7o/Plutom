@@ -1,4 +1,4 @@
-use crate::{chunk::Chunk, value::Value};
+use crate::{compiler::chunk::Chunk, value::Value};
 use core::fmt;
 use std::{
     cell::RefCell,
@@ -133,6 +133,15 @@ impl ObjFunction {
         match &self.name {
             Some(name) => print!("<fn {}>", name.value),
             None => print!("<Script>"),
+        }
+    }
+}
+
+impl fmt::Display for ObjFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.name {
+            Some(name) => write!(f, "<fn {}>", name.value),
+            None => write!(f, "<Script>"),
         }
     }
 }
