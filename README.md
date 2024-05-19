@@ -31,16 +31,16 @@ To install Plutom, follow these steps:
     ```
 
 ### Writing Your First Program
+Create a new file called `hello.plu` with the following content:
 ```
-# Create a new file called `hello.plu` with the following content:
-plutom
 print("Hello, World!");
-
+```
 # To compile and run your program, use the Plutom compiler:
+```
 plutom hello.plu
-
-# Running the REPL
+```
 Plutom comes with an interactive REPL (Read-Eval-Print Loop) for experimenting and testing code snippets. To start the REPL, simply run:
+```
 plutom
 ```
 
