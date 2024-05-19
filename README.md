@@ -35,11 +35,11 @@ Create a new file called `hello.plu` with the following content:
 ```
 print("Hello, World!");
 ```
-### To compile and run your program, use the Plutom compiler:
+To compile and run your program, use the Plutom compiler:
 ```
 plutom hello.plu
 ```
-### Plutom comes with an interactive REPL (Read-Eval-Print Loop) for experimenting and testing code snippets. To start the REPL, simply run:
+Plutom comes with an interactive REPL (Read-Eval-Print Loop) for experimenting and testing code snippets. To start the REPL, simply run:
 ```
 plutom
 ```
