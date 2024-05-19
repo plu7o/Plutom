@@ -1,7 +1,10 @@
-let map = { 
-    1+1: 1,
-    "key2": 2,
-    "key3": 3
+let dict = {
+    1: "key",
+    2: "key",
+    3: "key"
 };
 
-print(map[1]);
+print(dict);
+dict[1] = "changed;
+
+print(dict);

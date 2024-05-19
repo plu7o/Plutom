@@ -28,7 +28,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::GetGlobal => constant_op("GET_GLOBAL", &chunk, offset),
         OpCode::SetGlobal => constant_op("SET_GLOBAL", &chunk, offset),
         OpCode::List => constant_op("LIST", &chunk, offset),
-        OpCode::Map => constant_op("LIST", &chunk, offset),
+        OpCode::Map => constant_op("MAP", &chunk, offset),
         OpCode::GetLocal => byte_op("GET_LOCAL", &chunk, offset),
         OpCode::SetLocal => byte_op("SET_LOCAL", &chunk, offset),
         OpCode::Call => byte_op("CALL", &chunk, offset),
@@ -59,7 +59,7 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
             let constant = chunk.code[offset];
             offset += 1;
             print!("{:16} {:4} ", "CLOSURE", constant);
-            chunk.constants[constant].print();
+            print!("{}", chunk.constants[constant]);
             println!();
             offset
         }
@@ -74,7 +74,7 @@ fn simple_op(name: &str, offset: usize) -> usize {
 fn byte_op(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let slot = chunk.code[offset + 1];
     print!("{:16} [{}] = ", name, slot);
-    chunk.constants[slot].print();
+    print!("{}", chunk.constants[slot]);
     println!();
     return offset + 2;
 }
@@ -94,7 +94,7 @@ fn jump_op(name: &str, sign: isize, chunk: &Chunk, offset: usize) -> usize {
 fn constant_op(name: &str, chunk: &Chunk, offset: usize) -> usize {
     let slot = chunk.code[offset + 1];
     print!("{:16} [{}] = ", name, slot);
-    chunk.constants[slot].print();
+    print!("{}", chunk.constants[slot]);
     println!();
     offset + 2
 }

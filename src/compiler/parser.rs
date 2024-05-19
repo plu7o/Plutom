@@ -879,11 +879,7 @@ impl<'a> Parser<'a> {
                 &format!("{} at end.", msg),
                 self.prev.location,
             ),
-            TokenType::Err => error::report_error(
-                &self.source,
-                &format!("{} at unkonw token.", msg),
-                token.location,
-            ),
+            TokenType::Err => error::report_error(&self.source, &msg, token.location),
             _ => error::report_error(
                 &self.source,
                 &format!("{} at '{}'.", msg, token.literal),

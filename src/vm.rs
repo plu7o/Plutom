@@ -1,6 +1,8 @@
 use crate::{
-    compiler::chunk::OpCode,
-    compiler::compiler::{Compiler, FunctionType},
+    compiler::{
+        chunk::OpCode,
+        compiler::{Compiler, FunctionType},
+    },
     debug::disassemble_instruction,
     error,
     objects::object::{ObjClosure, ObjString, ObjType},
@@ -8,7 +10,7 @@ use crate::{
     value::Value,
     DEBUG_TRACE_EXECUTION,
 };
-use core::str;
+use core::{fmt, str};
 use std::{cell::RefCell, char, collections::HashMap, fmt::Debug, rc::Rc, usize};
 
 enum BinaryOps {
@@ -19,6 +21,20 @@ enum BinaryOps {
     LT,
     GT,
     EQ,
+}
+
+impl fmt::Display for BinaryOps {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinaryOps::ADD => write!(f, "+"),
+            BinaryOps::SUB => write!(f, "-"),
+            BinaryOps::DIV => write!(f, "/"),
+            BinaryOps::MUL => write!(f, "*"),
+            BinaryOps::LT => write!(f, "<"),
+            BinaryOps::GT => write!(f, ">"),
+            BinaryOps::EQ => write!(f, "=="),
+        }
+    }
 }
 
 pub enum InterpretResult<T, E> {
@@ -174,9 +190,7 @@ impl VM {
                         _ => {
                             self.runtime_error(&format!(
                                 "Operation not supported on Strings -> {} {} {}.",
-                                left,
-                                stringify!($op),
-                                right
+                                left, $op, right
                             ));
                             return InterpretResult::RuntimeErr("BinaryOpError");
                         }
@@ -195,9 +209,7 @@ impl VM {
                         _ => {
                             self.runtime_error(&format!(
                                 "Operation not supported on Strings -> {} {} {}.",
-                                left,
-                                stringify!($op),
-                                right
+                                left, $op, right
                             ));
                             return InterpretResult::RuntimeErr("BinaryOpError");
                         }
@@ -205,9 +217,7 @@ impl VM {
                     _ => {
                         self.runtime_error(&format!(
                             "Operation not supported -> {} {} {}.",
-                            left,
-                            stringify!($op),
-                            right
+                            left, $op, right
                         ));
                         return InterpretResult::RuntimeErr("BinaryOpError");
                     }
@@ -219,7 +229,7 @@ impl VM {
             if DEBUG_TRACE_EXECUTION {
                 for slot in self.stack.iter() {
                     print!("[ ");
-                    slot.as_ref().borrow().print();
+                    print!("{}", slot.as_ref().borrow());
                     print!(" ]");
                 }
                 println!();
@@ -384,6 +394,7 @@ impl VM {
                             }
                         };
                     }
+                    self.push(Value::map(dict));
                 }
                 OpCode::GetIndex => {
                     let index = self.pop();
@@ -392,14 +403,16 @@ impl VM {
                     let index = index.as_ref().borrow();
                     let getter = obj.as_ref().borrow();
 
-                    if !index.is_int() {
-                        self.runtime_error(&format!("Index Value must be Int but got: {}", index));
-                        return InterpretResult::RuntimeErr("IndexError");
-                    }
-                    let index = index.as_int().value;
-
                     match getter.as_object() {
                         ObjType::List(list) => {
+                            if !index.is_int() {
+                                self.runtime_error(&format!(
+                                    "Index Value must be Int but got: {}",
+                                    index
+                                ));
+                                return InterpretResult::RuntimeErr("IndexError");
+                            }
+                            let index = index.as_int().value;
                             match self.check_bounds(&index, &(list.items.len() as i64)) {
                                 Ok(()) => {
                                     if index.is_negative() {
@@ -415,7 +428,24 @@ impl VM {
                                 }
                             }
                         }
+                        ObjType::Map(map) => {
+                            match map.dict.get(&index) {
+                                Some(value) => self.push(value.clone()),
+                                None => {
+                                    self.runtime_error(&format!("Key not found in {:#?}", map));
+                                    return InterpretResult::RuntimeErr("KeyError");
+                                }
+                            };
+                        }
                         ObjType::Str(str) => {
+                            if !index.is_int() {
+                                self.runtime_error(&format!(
+                                    "Index Value must be Int but got: {}",
+                                    index
+                                ));
+                                return InterpretResult::RuntimeErr("IndexError");
+                            }
+                            let index = index.as_int().value;
                             match self.check_bounds(&index, &(str.value.len() as i64)) {
                                 Ok(()) => {
                                     if index.is_negative() {
@@ -450,14 +480,16 @@ impl VM {
                     let index = index.as_ref().borrow();
                     let mut getter = obj.as_ref().borrow_mut();
 
-                    if !index.is_int() {
-                        self.runtime_error(&format!("Index Value must be Int but got: {}", index));
-                        return InterpretResult::RuntimeErr("IndexError");
-                    }
-                    let index = index.as_int().value;
-
                     match getter.as_mut_object() {
                         ObjType::List(list) => {
+                            if !index.is_int() {
+                                self.runtime_error(&format!(
+                                    "Index Value must be Int but got: {}",
+                                    index
+                                ));
+                                return InterpretResult::RuntimeErr("IndexError");
+                            }
+                            let index = index.as_int().value;
                             match self.check_bounds(&index, &(list.items.len() as i64)) {
                                 Ok(()) => {
                                     if index.is_negative() {
@@ -474,8 +506,19 @@ impl VM {
                             };
                             self.push(Value::none());
                         }
+                        ObjType::Map(map) => {
+                            if map
+                                .dict
+                                .insert(index.to_owned(), setter.to_owned())
+                                .is_none()
+                            {
+                                self.runtime_error(&format!("Key not found in {:#?}", map));
+                                return InterpretResult::RuntimeErr("KeyError");
+                            }
+                            self.push(Value::none());
+                        }
                         _ => {
-                            self.runtime_error(&format!("Value is not indexable {}", getter));
+                            self.runtime_error(&format!("Value is not Setable {}", getter));
                             return InterpretResult::RuntimeErr("IndexError");
                         }
                     }

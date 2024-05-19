@@ -5,6 +5,7 @@ pub fn report_error(source: &str, format: &str, location: Loc) {
 
     if location.row == 0 || location.row > code.len() {
         eprintln!("Error: Row {} is out of bounds", location.row);
+        println!("{}", format);
         return;
     }
 
@@ -16,13 +17,14 @@ pub fn report_error(source: &str, format: &str, location: Loc) {
             "Error: Column {} is out of bounds on line {}",
             location.col, location.row
         );
+        println!("{}", format);
         return;
     }
 
     let spacer: String = " ".repeat(col);
     let marker: String = "^".repeat(location.len);
     let indicator = format!("{}{}", spacer, marker);
-    let arrow = format!("{}|", spacer);
+    let arrow = format!("{}|", "_".repeat(col));
     let msg = format!("[Line {}:{}] {}", location.row, location.col, format);
 
     println!();
@@ -30,8 +32,8 @@ pub fn report_error(source: &str, format: &str, location: Loc) {
     println!("------------------------------------------------------------------------");
     println!("{code_line}");
     println!("{indicator}");
-    if col == 1 {
+    if col > 1 {
         println!("{arrow}");
     }
-    println!("------------------------------------------------------------------------");
+    println!();
 }

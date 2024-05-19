@@ -8,6 +8,8 @@ use std::{
     rc::Rc,
 };
 
+use super::{list::ObjList, map::ObjMap};
+
 pub type NativeFn = fn(usize, &[Rc<RefCell<Value>>]) -> Result<Value, String>;
 
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq)]
@@ -32,6 +34,7 @@ pub enum ObjType {
     Native(ObjNative),
     Closure(ObjClosure),
     List(ObjList),
+    Map(ObjMap),
 }
 
 impl fmt::Display for ObjType {
@@ -51,6 +54,7 @@ impl PartialEq for ObjType {
             ObjType::Closure(closure) => closure == other,
             ObjType::Native(native) => native == other,
             ObjType::List(list) => list == other,
+            ObjType::Map(map) => map == other,
         }
     }
 }
@@ -207,41 +211,6 @@ impl PartialEq<ObjType> for ObjClosure {
     fn eq(&self, other: &ObjType) -> bool {
         match other {
             ObjType::Closure(closure) => closure.function == self.function,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ObjList {
-    pub len: usize,
-    pub items: Vec<Value>,
-}
-
-impl ObjList {
-    pub fn new(items: Vec<Value>) -> Self {
-        Self {
-            len: items.len(),
-            items,
-        }
-    }
-
-    pub fn print(&self) {
-        print!("[");
-        for (i, item) in self.items.iter().enumerate() {
-            item.print();
-            if i != self.items.len() - 1 {
-                print!(", ");
-            }
-        }
-        print!("]")
-    }
-}
-
-impl PartialEq<ObjType> for ObjList {
-    fn eq(&self, other: &ObjType) -> bool {
-        match other {
-            ObjType::List(list) => list.items == self.items,
             _ => false,
         }
     }

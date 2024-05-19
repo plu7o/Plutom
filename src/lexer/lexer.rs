@@ -135,7 +135,7 @@ impl<'a> Lexer<'a> {
             &self.source[self.start..self.current],
             Loc {
                 row: self.line,
-                col: self.start - self.line_start + 1,
+                col: self.start - self.line_start,
                 len: self.current - self.start,
             },
         )
@@ -147,7 +147,7 @@ impl<'a> Lexer<'a> {
             msg,
             Loc {
                 row: self.line,
-                col: self.start - self.line_start + 1,
+                col: self.start - self.line_start,
                 len: self.current - self.start,
             },
         )
@@ -176,15 +176,22 @@ impl<'a> Lexer<'a> {
     }
 
     fn string(&mut self) -> Token<'a> {
+        let line_start = self.line_start;
+        let line = self.line;
+        let current = self.current;
+
         while self.peek() != '"' && !self.is_at_end() {
             if self.peek() == '\n' {
                 self.line += 1;
-                self.line_start = self.line_start + 1;
+                self.line_start = self.current;
             }
             self.advance();
         }
 
         if self.is_at_end() {
+            self.line_start = line_start;
+            self.line = line;
+            self.current = current;
             return self.error_token("Unterminated string.");
         }
 

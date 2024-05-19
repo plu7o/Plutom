@@ -1,8 +1,12 @@
 use core::fmt;
+use std::collections::HashMap;
 
-use crate::objects::object::{
-    NativeFn, ObjBool, ObjClosure, ObjFloat, ObjFunction, ObjInt, ObjList, ObjNative, ObjString,
-    ObjType,
+use crate::objects::{
+    list::ObjList,
+    map::ObjMap,
+    object::{
+        NativeFn, ObjBool, ObjClosure, ObjFloat, ObjFunction, ObjInt, ObjNative, ObjString, ObjType,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -86,6 +90,10 @@ impl Value {
         Value::object(ObjType::List(ObjList::new(items)))
     }
 
+    pub fn map(dict: HashMap<Value, Value>) -> Value {
+        Value::object(ObjType::Map(ObjMap::new(dict)))
+    }
+
     pub fn as_none(&self) -> &ValueType {
         match &self._type {
             ValueType::None => &self._type,
@@ -140,9 +148,8 @@ impl Value {
         as_type!(&self._type, ObjType::List, "Expected ObjList")
     }
 
-    pub fn as_mut_list(&mut self) -> &mut ObjList {
-        let val_type = &mut self._type;
-        as_type!(val_type, ObjType::List, "Expected Mutable ObjList")
+    pub fn as_map(&self) -> &ObjMap {
+        as_type!(&self._type, ObjType::Map, "Expected ObjList")
     }
 
     pub fn is_none(&self) -> bool {
@@ -195,6 +202,10 @@ impl Value {
         is_type!(&self._type, ObjType::List)
     }
 
+    pub fn is_map(&self) -> bool {
+        is_type!(&self._type, ObjType::Map)
+    }
+
     pub fn print(&self) {
         match &self._type {
             ValueType::Object(object) => match object {
@@ -206,6 +217,7 @@ impl Value {
                 ObjType::Native(native) => native.print(),
                 ObjType::Closure(closure) => closure.print(),
                 ObjType::List(list) => list.print(),
+                ObjType::Map(map) => map.print(),
             },
             ValueType::None => print!("none"),
         }
@@ -219,11 +231,31 @@ impl fmt::Display for Value {
                 ObjType::Bool(bool) => write!(f, "Bool({})", bool.value),
                 ObjType::Int(int) => write!(f, "Int({})", int.value),
                 ObjType::Float(float) => write!(f, "Float({})", float.value.raw),
-                ObjType::Str(string) => write!(f, "String({})", string.value),
+                ObjType::Str(string) => write!(f, "String('{}')", string.value),
                 ObjType::Function(func) => write!(f, "{}", func),
                 ObjType::Native(_) => write!(f, "<NativeFn>"),
                 ObjType::Closure(_) => write!(f, "<Closure>"),
-                ObjType::List(list) => write!(f, "List({:#?})", list.items),
+                ObjType::List(list) => {
+                    let mut format = "List[ ".to_string();
+                    for (i, item) in list.items.iter().enumerate() {
+                        format.push_str(&format!("{}", item));
+                        if i != list.items.len() - 1 {
+                            format.push_str(", ");
+                        }
+                    }
+                    format.push_str(" ]");
+                    println!("{}", format);
+                    write!(f, "{}", format)
+                }
+                ObjType::Map(map) => {
+                    let mut format = "Map{ ".to_string();
+                    for (key, value) in &map.dict {
+                        format.push_str(&format!("{}", key));
+                        format.push_str(&format!(": {}, ", value));
+                    }
+                    format.push_str("}");
+                    write!(f, "{}", format)
+                }
             },
             ValueType::None => write!(f, "None"),
         }
