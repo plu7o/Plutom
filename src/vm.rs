@@ -73,7 +73,7 @@ impl VM {
 
     pub fn init() -> Self {
         let mut vm = VM::new();
-        vm.define_native("time", natives::clock_native);
+        vm.define_native("time", natives::time_native);
         vm.define_native("sleep", natives::sleep_native);
         vm.define_native("print", natives::print_native);
         vm.define_native("input", natives::input_native);

@@ -1,10 +1,15 @@
-let dict = {
-    1: "key",
-    2: "key",
-    3: "key"
-};
+let m1 = {};         # empty Map
 
-print(dict);
-dict[1] = "changed;
+let m2 = {           # initilize Map with values
+    1: "key", 
+    2: "key2",
+    3: "key3" 
+};  
 
-print(dict);
+print(m2[1]);        # access item with key  
+
+m1["new_key"] = 10;  # set insert new Key and Value
+m2[3] = "changed";   # update value at Key
+
+print(m1);
+print(m2);

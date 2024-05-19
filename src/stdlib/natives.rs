@@ -20,7 +20,7 @@ pub fn type_native(arg_count: usize, args: &[Rc<RefCell<Value>>]) -> Result<Valu
     Ok(Value::none())
 }
 
-pub fn clock_native(_arg_count: usize, _args: &[Rc<RefCell<Value>>]) -> Result<Value, String> {
+pub fn time_native(_arg_count: usize, _args: &[Rc<RefCell<Value>>]) -> Result<Value, String> {
     let now = SystemTime::now();
     let duration = now.duration_since(UNIX_EPOCH).unwrap();
     let miliseconds = duration.as_secs() * 1000 + duration.as_millis() as u64;

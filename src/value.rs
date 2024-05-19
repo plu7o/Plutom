@@ -236,15 +236,14 @@ impl fmt::Display for Value {
                 ObjType::Native(_) => write!(f, "<NativeFn>"),
                 ObjType::Closure(_) => write!(f, "<Closure>"),
                 ObjType::List(list) => {
-                    let mut format = "List[ ".to_string();
+                    let mut format = "List[".to_string();
                     for (i, item) in list.items.iter().enumerate() {
                         format.push_str(&format!("{}", item));
                         if i != list.items.len() - 1 {
                             format.push_str(", ");
                         }
                     }
-                    format.push_str(" ]");
-                    println!("{}", format);
+                    format.push_str("]");
                     write!(f, "{}", format)
                 }
                 ObjType::Map(map) => {
