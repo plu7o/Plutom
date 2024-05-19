@@ -143,7 +143,7 @@ let m2 = {           # initilize Map with values
 
 print(m2[1]);        # access item with key  
 
-m1["new_key"] = 10;  # set insert new Key and Value
+m1["new_key"] = 10;  # insert new Key and Value
 m2[3] = "changed";   # update value at Key
 
 print(m1);
@@ -243,19 +243,21 @@ Clone Your Fork:
 ```
 git clone https:#github.com/yourusername/plutom.git
 cd plutom
-
+```
 Create a Branch:
+```
 git checkout -b feature/your-feature-name
-
+```
 Make Your Changes: Implement your changes and add tests as needed.
 Commit Your Changes:
-git commit -m "Add some feature"
-
-Push to Your Fork:
-git push origin feature/your-feature-name
-
-Create a Pull Request: Open a pull request on the original repository.
 ```
+git commit -m "Add some feature"
+```
+Push to Your Fork:
+```
+git push origin feature/your-feature-name
+```
+Create a Pull Request: Open a pull request on the original repository.
 
 ### License
 Plutom is licensed under the MIT License. See the LICENSE file for more details.
