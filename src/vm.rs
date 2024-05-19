@@ -225,6 +225,48 @@ impl VM {
             }};
         }
 
+        macro_rules! pre_op {
+            ($op:tt) => {{
+                let value_ptr = self.pop();
+                let value = value_ptr.as_ref();
+                match value.borrow_mut().as_mut_object() {
+                    ObjType::Int(i) => {
+                        i.value = i.value $op 1;
+                    }
+                    ObjType::Float(f) => {
+                        f.value.raw = f.value.raw $op 1.0;
+                    }
+                    _ => {
+                        self.runtime_error(&format!("Increment on {} not supported", value.borrow()));
+                        return InterpretResult::RuntimeErr("PreOpError");
+                    }
+                }
+                self.push_pointer(value_ptr);
+            }};
+        }
+
+        macro_rules! post_op {
+            ($op:tt) => {{
+                let value_ptr = self.pop();
+                let value = value_ptr.as_ref();
+
+                match value.borrow_mut().as_mut_object() {
+                    ObjType::Int(i) => {
+                        self.push(Value::int(i.value));
+                        i.value = i.value $op 1;
+                    }
+                    ObjType::Float(f) => {
+                        self.push(Value::float(f.value.raw));
+                        f.value.raw = f.value.raw $op 1.0;
+                    }
+                    _ => {
+                        self.runtime_error(&format!("Increment on {} not supported", value.borrow()));
+                        return InterpretResult::RuntimeErr("PostOpError");
+                    }
+                };
+            }};
+        }
+
         loop {
             if DEBUG_TRACE_EXECUTION {
                 for slot in self.stack.iter() {
@@ -247,13 +289,19 @@ impl VM {
                 OpCode::NONE => self.push(Value::none()),
                 OpCode::TRUE => self.push(Value::bool(true)),
                 OpCode::FALSE => self.push(Value::bool(false)),
+                OpCode::Inc => pre_op!(+),
+                OpCode::Dec => pre_op!(-),
+                OpCode::PreInc => pre_op!(+),
+                OpCode::PreDec => pre_op!(-),
+                OpCode::PostInc => post_op!(+),
+                OpCode::PostDec => post_op!(-),
                 OpCode::DefineGlobal => {
                     let name = read_const!();
                     let name = name.as_string();
                     self.globals.insert(name.clone(), self.peek(0).clone());
                     self.pop();
                 }
-                OpCode::GetGlobal => {
+                OpCode::LoadGlobal => {
                     let name = read_const!().as_string().clone();
                     if let Some(value) = self.globals.get(&name) {
                         self.push_pointer(value.clone());
@@ -271,7 +319,7 @@ impl VM {
                         return InterpretResult::RuntimeErr("VariableError");
                     }
                 }
-                OpCode::GetLocal => {
+                OpCode::LoadLocal => {
                     let slot = read_byte!();
                     self.push_pointer(frame.slots[slot].clone());
                 }
@@ -507,14 +555,7 @@ impl VM {
                             self.push(Value::none());
                         }
                         ObjType::Map(map) => {
-                            if map
-                                .dict
-                                .insert(index.to_owned(), setter.to_owned())
-                                .is_none()
-                            {
-                                self.runtime_error(&format!("Key not found in {:#?}", map));
-                                return InterpretResult::RuntimeErr("KeyError");
-                            }
+                            map.dict.insert(index.to_owned(), setter.to_owned());
                             self.push(Value::none());
                         }
                         _ => {

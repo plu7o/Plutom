@@ -52,13 +52,47 @@ impl<'a> Lexer<'a> {
             ';' => self.make_token(TokenType::SemiColon),
             ',' => self.make_token(TokenType::Comma),
             '.' => self.make_token(TokenType::Dot),
-            '-' => self.make_token(TokenType::Minus),
-            '+' => self.make_token(TokenType::Plus),
-            '/' => self.make_token(TokenType::Slash),
-            '*' => self.make_token(TokenType::Star),
             '$' => self.make_token(TokenType::Dollar),
             '_' => self.make_token(TokenType::UnderScore),
+            '?' => self.make_token(TokenType::QuestionMark),
+            '%' => self.make_token(TokenType::Modulo),
             '"' => self.string(),
+            '-' => {
+                let token = if self.match_token('=') {
+                    TokenType::MinusEq
+                } else if self.match_token('-') {
+                    TokenType::MinusMinus
+                } else {
+                    TokenType::Minus
+                };
+                self.make_token(token)
+            }
+            '+' => {
+                let token = if self.match_token('=') {
+                    TokenType::PlusEq
+                } else if self.match_token('+') {
+                    TokenType::PlusPlus
+                } else {
+                    TokenType::Plus
+                };
+                self.make_token(token)
+            }
+            '/' => {
+                let token = if self.match_token('=') {
+                    TokenType::SlashEq
+                } else {
+                    TokenType::Slash
+                };
+                self.make_token(token)
+            }
+            '*' => {
+                let token = if self.match_token('=') {
+                    TokenType::SlashEq
+                } else {
+                    TokenType::Star
+                };
+                self.make_token(token)
+            }
             '!' => {
                 let token = if self.match_token('=') {
                     TokenType::BangEQ

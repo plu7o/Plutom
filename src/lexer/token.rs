@@ -19,6 +19,8 @@ pub enum TokenType {
     Star,
     Dollar,
     UnderScore,
+    QuestionMark,
+    Modulo,
 
     // One or two character tokens.
     Bang,
@@ -30,6 +32,12 @@ pub enum TokenType {
     Lt,
     LtEq,
     Arm,
+    PlusPlus,
+    MinusMinus,
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
 
     // Literals.
     Ident,

@@ -16,14 +16,15 @@ use super::{
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Precedence {
     NONE,
-    ASSIGNMENT, // =
+    ASSIGNMENT, // = += -= *= /=
+    TERNARY,    // ?
     OR,         // or
     AND,        // and
     EQUALITY,   // == !=
     COMPARISON, // < > <= >=
     TERM,       // + -
-    FACTOR,     // * /
-    UNARY,      // ! -
+    FACTOR,     // * / %
+    UNARY,      // ! - -- ++
     CALL,       // . () []
     PRIMARY,
 }
@@ -31,11 +32,13 @@ enum Precedence {
 #[derive(Debug)]
 enum ParseFn {
     Variable,
+    Ternary,
     And,
     Or,
     Binary,
     Grouping,
-    Unary,
+    Prefix,
+    Postfix,
     Number,
     String,
     Literal,
@@ -90,13 +93,15 @@ impl<'a> Parser<'a> {
     fn parse(&mut self, rule: ParseFn, can_assign: bool) {
         match rule {
             ParseFn::Variable => self.variable(can_assign),
-            ParseFn::Call => self.call(can_assign),
-            ParseFn::Index => self.index(can_assign),
-            ParseFn::And => self.and(),
+            ParseFn::Ternary => self.ternary(),
             ParseFn::Or => self.or(),
+            ParseFn::And => self.and(),
             ParseFn::Binary => self.binary(),
             ParseFn::Grouping => self.grouping(),
-            ParseFn::Unary => self.unary(),
+            ParseFn::Index => self.index(can_assign),
+            ParseFn::Prefix => self.prefix(),
+            ParseFn::Postfix => self.postfix(),
+            ParseFn::Call => self.call(can_assign),
             ParseFn::Number => self.number(),
             ParseFn::String => self.string(),
             ParseFn::Literal => self.literal(),
@@ -128,6 +133,11 @@ impl<'a> Parser<'a> {
     fn get_rule(&mut self, _type: TokenType) -> ParseRule {
         match _type {
             TokenType::Eq           => ParseRule::new(None,                    None,                  Precedence::ASSIGNMENT),
+            TokenType::PlusEq       => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::ASSIGNMENT),
+            TokenType::MinusEq      => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::ASSIGNMENT),
+            TokenType::SlashEq      => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::ASSIGNMENT),
+            TokenType::StarEq       => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::ASSIGNMENT),
+            TokenType::QuestionMark => ParseRule::new(None,                    Some(ParseFn::Ternary),Precedence::TERNARY),
             TokenType::Or           => ParseRule::new(None,                    Some(ParseFn::Or),     Precedence::OR),
             TokenType::And          => ParseRule::new(None,                    Some(ParseFn::And),    Precedence::AND),
             TokenType::BangEQ       => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::EQUALITY),
@@ -137,15 +147,18 @@ impl<'a> Parser<'a> {
             TokenType::Lt           => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::COMPARISON),
             TokenType::LtEq         => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::COMPARISON),
             TokenType::Plus         => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::TERM),
-            TokenType::Minus        => ParseRule::new(Some(ParseFn::Unary),    Some(ParseFn::Binary), Precedence::TERM),
+            TokenType::PlusPlus     => ParseRule::new(Some(ParseFn::Prefix),   Some(ParseFn::Postfix),Precedence::UNARY),
+            TokenType::Minus        => ParseRule::new(Some(ParseFn::Prefix),   Some(ParseFn::Binary), Precedence::TERM),
+            TokenType::MinusMinus   => ParseRule::new(Some(ParseFn::Prefix),   Some(ParseFn::Postfix),Precedence::UNARY),
             TokenType::Star         => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::FACTOR),
             TokenType::Slash        => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::FACTOR),
+            TokenType::Modulo       => ParseRule::new(None,                    Some(ParseFn::Binary), Precedence::FACTOR),
             TokenType::Fn           => ParseRule::new(None,                    None,                  Precedence::CALL),
             TokenType::LeftParen    => ParseRule::new(Some(ParseFn::Grouping), Some(ParseFn::Call),   Precedence::CALL),
-            TokenType::LeftBrace    => ParseRule::new(Some(ParseFn::Literal),  Some(ParseFn::Index), Precedence::CALL),
+            TokenType::LeftBrace    => ParseRule::new(Some(ParseFn::Literal),  Some(ParseFn::Index),  Precedence::CALL),
             TokenType::LeftBracket  => ParseRule::new(Some(ParseFn::Literal),  Some(ParseFn::Index),  Precedence::CALL),
             TokenType::Return       => ParseRule::new(None,                    None,                  Precedence::PRIMARY),
-            TokenType::Bang         => ParseRule::new(Some(ParseFn::Unary),    None,                  Precedence::NONE),
+            TokenType::Bang         => ParseRule::new(Some(ParseFn::Prefix),   None,                  Precedence::NONE),
             TokenType::Integer      => ParseRule::new(Some(ParseFn::Number),   None,                  Precedence::NONE),
             TokenType::Float        => ParseRule::new(Some(ParseFn::Number),   None,                  Precedence::NONE),
             TokenType::String       => ParseRule::new(Some(ParseFn::String),   None,                  Precedence::NONE),
@@ -276,12 +289,12 @@ impl<'a> Parser<'a> {
 
         let arg = match self.resolve_local(&name) {
             Some(arg) => {
-                get_op = OpCode::GetLocal;
+                get_op = OpCode::LoadLocal;
                 set_op = OpCode::SetLocal;
                 arg
             }
             None => {
-                get_op = OpCode::GetGlobal;
+                get_op = OpCode::LoadGlobal;
                 set_op = OpCode::SetGlobal;
                 self.make_ident_const(&name)
             }
@@ -562,6 +575,21 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::RightBrace, "Expect '}' after block")
     }
 
+    fn ternary(&mut self) {
+        let then_jump = self.emit_jump(OpCode::JumpIfFalse as usize);
+        self.emit_byte(OpCode::POP as usize);
+        self.expression();
+
+        self.consume(TokenType::Colon, "Expected ':' after condition");
+
+        let else_jump = self.emit_jump(OpCode::Jump as usize);
+        self.patch_jump(then_jump);
+        self.emit_byte(OpCode::POP as usize);
+
+        self.expression();
+        self.patch_jump(else_jump);
+    }
+
     fn and(&mut self) {
         let end_jump = self.emit_jump(OpCode::JumpIfFalse as usize);
         self.emit_byte(OpCode::POP as usize);
@@ -591,10 +619,22 @@ impl<'a> Parser<'a> {
             TokenType::GtEq => self.emit_bytes(OpCode::LESS as usize, OpCode::NOT as usize),
             TokenType::Lt => self.emit_byte(OpCode::LESS as usize),
             TokenType::LtEq => self.emit_bytes(OpCode::GREATER as usize, OpCode::NOT as usize),
-            TokenType::Plus => self.emit_byte(OpCode::ADD as usize),
-            TokenType::Minus => self.emit_byte(OpCode::SUBSTRACT as usize),
+            TokenType::Plus => {
+                if self.prev.literal == "1" || self.prev.literal == "1.0" {
+                    return self.emit_byte(OpCode::Inc as usize);
+                }
+                self.emit_byte(OpCode::ADD as usize)
+            }
+            TokenType::Minus => {
+                if self.prev.literal == "1" || self.prev.literal == "1.0" {
+                    return self.emit_byte(OpCode::Dec as usize);
+                }
+                self.emit_byte(OpCode::SUBSTRACT as usize)
+            }
             TokenType::Star => self.emit_byte(OpCode::MULTIPLY as usize),
             TokenType::Slash => self.emit_byte(OpCode::DIVIDE as usize),
+            TokenType::PlusPlus => return self.emit_byte(OpCode::PostInc as usize),
+            TokenType::MinusMinus => return self.emit_byte(OpCode::PostDec as usize),
             _ => self.error_at_current(format!("{:#?} is not a binary operator", op_type)),
         }
     }
@@ -604,13 +644,23 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::RightParen, "Expect ')' after expression.");
     }
 
-    fn unary(&mut self) {
+    fn postfix(&mut self) {
+        let op_type = self.prev._type;
+        match op_type {
+            TokenType::PlusPlus => return self.emit_byte(OpCode::PostInc as usize),
+            TokenType::MinusMinus => return self.emit_byte(OpCode::PostDec as usize),
+            _ => self.error_at_current(format!("{:#?} is not a postfix operator", op_type)),
+        };
+    }
+
+    fn prefix(&mut self) {
         let op_type = self.prev._type;
         self.parse_precedence(Precedence::UNARY);
-
         match op_type {
-            TokenType::Minus => self.emit_byte(OpCode::NEGATE as usize),
-            TokenType::Bang => self.emit_byte(OpCode::NOT as usize),
+            TokenType::Minus => return self.emit_byte(OpCode::NEGATE as usize),
+            TokenType::Bang => return self.emit_byte(OpCode::NOT as usize),
+            TokenType::PlusPlus => return self.emit_byte(OpCode::PreInc as usize),
+            TokenType::MinusMinus => return self.emit_byte(OpCode::PreDec as usize),
             _ => self.error_at_current(format!("{:#?} is not a unary operator", op_type)),
         }
     }

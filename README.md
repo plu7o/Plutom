@@ -57,18 +57,23 @@ let c = 5 == 6;
 let d = 7 != 8;     
 let e = !(9 < 10);  # Logic negation
 
-TODO: # Ternary
+# Ternary
+
 let foo = 1 + 1 == 2 ? true : false;
 
 # Arithmetic operations
+
 let x = 1 + 1;      
 let x = 1 - 1;  
-let y = -x;         # Negation
 
-TODO: # Prefix incerement
+# Negation
+let y = -x;         
+let z = !true;
+
+# Prefix incerement
 let z = ++y; 
 
-TODO: # Postfix incerement
+# Postfix incerement
 let z = y++;      
 
 TODO # assignment operators
