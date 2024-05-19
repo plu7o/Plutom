@@ -1,5 +1,5 @@
 # Plutom Programming Language
-Plutom is a dynamically-typed, compiled, all-purpose programming language designed to provide flexibility and performance for a wide range of applications. Whether you're developing web applications, system utilities, or anything in between, Plutom aims to be your go-to language for rapid development and efficient execution.
+Plutom is a fast, dynamically-typed, compiled, all-purpose programming language designed to provide flexibility and performance for a wide range of applications. Whether you're developing web applications, system utilities, or anything in between, Plutom aims to be your go-to language for rapid development and efficient execution. The language is written in Rust with no dependencies, ensuring a lightweight and efficient runtime.
 
 ## Features
 
