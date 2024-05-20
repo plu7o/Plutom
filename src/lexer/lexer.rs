@@ -87,7 +87,7 @@ impl<'a> Lexer<'a> {
             }
             '*' => {
                 let token = if self.match_token('=') {
-                    TokenType::SlashEq
+                    TokenType::StarEq
                 } else {
                     TokenType::Star
                 };
@@ -265,6 +265,7 @@ impl<'a> Lexer<'a> {
                     match self.get(self.start + 1) {
                         'l' => return self.check_keyword(2, 2, "se", TokenType::Else),
                         'c' => return self.check_keyword(2, 2, "ho", TokenType::Echo),
+                        'n' => return self.check_keyword(2, 2, "um", TokenType::Enum),
                         _ => (),
                     }
                 }

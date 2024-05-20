@@ -1,4 +1,5 @@
 use crate::{
+    debug::disassemble_chunk,
     error,
     lexer::{
         lexer::Lexer,
@@ -6,6 +7,7 @@ use crate::{
     },
     objects::object::{ObjFunction, ObjString},
     value::Value,
+    DEBUG_DUMP_CODE,
 };
 
 use super::{
@@ -176,9 +178,10 @@ impl<'a> Parser<'a> {
             TokenType::While        => ParseRule::new(None,                    None,                  Precedence::NONE),
             TokenType::Else         => ParseRule::new(None,                    None,                  Precedence::NONE),
             TokenType::If           => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::Enum         => ParseRule::new(None,                    None,                  Precedence::NONE),
             TokenType::Match        => ParseRule::new(None,                    None,                  Precedence::NONE),
-            TokenType::UnderScore   => ParseRule::new(None,                    None,                  Precedence::NONE),
             TokenType::Arm          => ParseRule::new(None,                    None,                  Precedence::NONE),
+            TokenType::UnderScore   => ParseRule::new(None,                    None,                  Precedence::NONE),
             TokenType::RightParen   => ParseRule::new(None,                    None,                  Precedence::NONE),
             TokenType::RightBrace   => ParseRule::new(None,                    None,                  Precedence::NONE),
             TokenType::RightBracket => ParseRule::new(None,                    None,                  Precedence::NONE),
@@ -218,6 +221,8 @@ impl<'a> Parser<'a> {
             self.func_declaration();
         } else if self.match_token(TokenType::Let) {
             self.var_declaration();
+        } else if self.match_token(TokenType::Enum) {
+            self.enum_declaration();
         } else {
             self.statement();
         }
@@ -365,8 +370,46 @@ impl<'a> Parser<'a> {
         if a.literal.len() != b.literal.len() {
             return false;
         }
-
         a.literal == b.literal && a.literal.len() == b.literal.len()
+    }
+
+    // -----------------------------------------------------------
+    //                          Enums
+    // -----------------------------------------------------------
+
+    fn enum_declaration(&mut self) {
+        let global = self.parse_variable("Expect enum name");
+        self.mark_initialized();
+        self.parse_enum();
+        self.define_var(global);
+    }
+
+    fn parse_enum(&mut self) {
+        let mut count = 0;
+        self.consume(TokenType::LeftBrace, "Expected '{' after enum name");
+
+        loop {
+            let op_type = self.current._type;
+            match op_type {
+                TokenType::Ident => {
+                    let prev = self.current;
+                    self.emit_const(Value::string(prev.clone().literal.to_string()));
+                    count += 1;
+                }
+                _ => {
+                    let prev = self.current;
+                    self.error_at(&prev, "Enum variant must be Identifier");
+                }
+            };
+            self.advance();
+            if !self.match_token(TokenType::Comma) {
+                break;
+            }
+        }
+        self.consume(TokenType::RightBrace, "Expected '}' after variants");
+
+        let value = self.make_const(Value::int(count));
+        self.emit_bytes(OpCode::Enum as usize, value);
     }
 
     // -----------------------------------------------------------
@@ -414,8 +457,8 @@ impl<'a> Parser<'a> {
         self.block();
 
         let function = self.end_compiler();
-        let value = self.make_const(Value::function(function));
 
+        let value = self.make_const(Value::function(function));
         self.emit_bytes(OpCode::Closure as usize, value);
     }
 
@@ -481,25 +524,54 @@ impl<'a> Parser<'a> {
 
     fn match_stmt(&mut self) {
         self.expression();
-        self.consume(TokenType::LeftBrace, "Expect '{' after match expression");
+        self.consume(TokenType::Colon, "Expected ':' after condition");
+        self.consume(TokenType::LeftBrace, "Expect '{' after match expression.");
 
-        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
-            if !self.match_token(TokenType::UnderScore) {
-                // case
-                self.expression();
-                self.emit_byte(OpCode::Compare as usize);
-                let jump_index = self.emit_jump(OpCode::JumpIfFalse as usize);
-                self.consume(TokenType::Arm, "Expect '=>' after case expression");
+        // Prepare a list to track the jump positions for the end of each arm
+        let mut end_jumps = Vec::new();
+        let mut default_start = None;
+
+        // Loop through all match arms
+        while !self.check(TokenType::RightBrace) {
+            if self.match_token(TokenType::UnderScore) {
+                if default_start.is_some() {
+                    self.error("Multiple default arms in match statement.".to_string());
+                }
+                self.consume(TokenType::Arm, "Expected '=>' after '_' in match arm.");
+                default_start = Some(self.compiler.current_chunk().code.len());
                 self.statement();
-                self.patch_jump(jump_index);
-                self.emit_byte(OpCode::POP as usize);
             } else {
-                // default
-                self.consume(TokenType::Arm, "Expect '=>' after case expression");
+                self.emit_byte(OpCode::Dup as usize);
+                self.expression();
+                self.emit_byte(OpCode::EQUAL as usize);
+
+                // Emit jump instruction for pattern matching
+                let case_jump = self.emit_jump(OpCode::JumpIfFalse as usize);
+                self.emit_byte(OpCode::POP as usize); // Pop the matched value
+
+                self.consume(TokenType::Arm, "Expected '=>' after case pattern.");
                 self.statement();
+
+                // Emit jump to exit after successful match
+                let end_jump = self.emit_jump(OpCode::Jump as usize);
+                end_jumps.push(end_jump);
+
+                // Patch the case jump to continue with the next pattern
+                self.patch_jump(case_jump);
+                self.emit_byte(OpCode::POP as usize); // Pop the matched value if case failed
+                                                      //
+                if !self.match_token(TokenType::Comma) && !self.check(TokenType::RightBrace) {
+                    self.error_at_current("Expect ',' after match arm.".to_string());
+                }
             }
         }
-        self.consume(TokenType::RightBrace, "Expect '}' after match body");
+
+        // Patch all end jumps to point to the end of the match statement
+        for jump in end_jumps {
+            self.patch_jump(jump);
+        }
+        self.emit_byte(OpCode::POP as usize); // Pop the matched value if case failed
+        self.consume(TokenType::RightBrace, "Expect '}' after match body.");
     }
 
     // -----------------------------------------------------------
@@ -666,6 +738,8 @@ impl<'a> Parser<'a> {
     }
 
     fn index(&mut self, can_assign: bool) {
+        self.parse_precedence(Precedence::CALL);
+
         self.expression();
         self.consume(TokenType::RightBracket, "Expected ']' after index value.");
 
@@ -875,9 +949,22 @@ impl<'a> Parser<'a> {
     pub fn end_compiler(&mut self) -> ObjFunction {
         self.emit_return();
         let function = self.compiler.function.clone();
+
+        if DEBUG_DUMP_CODE {
+            if !self.had_error {
+                let name = if let Some(name) = &function.name {
+                    &name.value
+                } else {
+                    "<Script>"
+                };
+                disassemble_chunk(&self.compiler.current_chunk(), name)
+            }
+        }
+
         if self.compiler.enclosing.is_some() {
             self.compiler = self.compiler.enclosing.clone().unwrap();
         }
+
         function.clone()
     }
 
@@ -910,6 +997,7 @@ impl<'a> Parser<'a> {
 
     fn error_at_current(&mut self, msg: String) {
         let current = self.current;
+        println!("{:#?}", current);
         self.error_at(&current, &msg);
     }
 

@@ -1,3 +1,5 @@
+use core::fmt;
+
 use crate::{lexer::token::Loc, value::Value};
 
 #[derive(Debug)]
@@ -40,6 +42,54 @@ pub enum OpCode {
     PreDec,
     PostInc,
     PostDec,
+    Enum,
+    Dup,
+}
+
+impl fmt::Display for OpCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OpCode::RETURN => write!(f, "RETURN"),
+            OpCode::CONST => write!(f, "CONST"),
+            OpCode::NEGATE => write!(f, "NEGATE"),
+            OpCode::ADD => write!(f, "ADD"),
+            OpCode::SUBSTRACT => write!(f, "SUB"),
+            OpCode::MULTIPLY => write!(f, "MUL"),
+            OpCode::DIVIDE => write!(f, "DIV"),
+            OpCode::NONE => write!(f, "NONE"),
+            OpCode::TRUE => write!(f, "TRUE"),
+            OpCode::FALSE => write!(f, "FALSE"),
+            OpCode::NOT => write!(f, "NOT"),
+            OpCode::EQUAL => write!(f, "EQ"),
+            OpCode::GREATER => write!(f, "GT"),
+            OpCode::LESS => write!(f, "LT"),
+            OpCode::ECHO => write!(f, "ECHO"),
+            OpCode::POP => write!(f, "POP"),
+            OpCode::DefineGlobal => write!(f, "DEF_GLOBAL"),
+            OpCode::LoadGlobal => write!(f, "LOAD_GLOBAL"),
+            OpCode::SetGlobal => write!(f, "SET_GLOBAL"),
+            OpCode::LoadLocal => write!(f, "LOAD_LOCAL"),
+            OpCode::SetLocal => write!(f, "SET_LOCAL"),
+            OpCode::JumpIfFalse => write!(f, "JUMP_IF_FALSE"),
+            OpCode::Jump => write!(f, "JUMP"),
+            OpCode::Loop => write!(f, "LOOP"),
+            OpCode::Compare => write!(f, "CMP"),
+            OpCode::Call => write!(f, "CALL"),
+            OpCode::Closure => write!(f, "CLOSURE"),
+            OpCode::List => write!(f, "LIST"),
+            OpCode::Map => write!(f, "MAP"),
+            OpCode::GetIndex => write!(f, "LOAD_IDX"),
+            OpCode::SetIndex => write!(f, "SET_IDX"),
+            OpCode::Inc => write!(f, "INC"),
+            OpCode::Dec => write!(f, "DEC"),
+            OpCode::PreInc => write!(f, "PRE_INC"),
+            OpCode::PreDec => write!(f, "PRE_DEC"),
+            OpCode::PostInc => write!(f, "POST_INC"),
+            OpCode::PostDec => write!(f, "POST_DEC"),
+            OpCode::Enum => write!(f, "ENUM"),
+            OpCode::Dup => write!(f, "DUP"),
+        }
+    }
 }
 
 impl Into<usize> for OpCode {
@@ -88,6 +138,8 @@ impl From<usize> for OpCode {
             34 => OpCode::PreDec,
             35 => OpCode::PostInc,
             36 => OpCode::PostDec,
+            37 => OpCode::Enum,
+            38 => OpCode::Dup,
             _ => panic!("Unkown OpCode"),
         }
     }

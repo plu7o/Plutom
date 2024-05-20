@@ -91,6 +91,30 @@ let a = 1;
 echo a;
 ```
 ---
+### Control flow
+```
+let i = 1;
+
+if i < 0: {
+    print("Negative");
+} else if i > 1 {
+    print("Positive");
+} else {
+    print("Zero");
+}
+
+let q = input("How is the wether?: ");
+match q: {
+    "Sunny" => {
+        print("Noice..");
+	    print(":)");
+    },
+    "Rainy" => print(":(");,
+    _ => print("Fuck Weather");,
+}
+
+```
+---
 ### Functions
 ```
 fn foo(bar, baz) {
@@ -100,7 +124,7 @@ fn foo(bar, baz) {
 foo(1, 3);
 ```
 ---
-### TODO Closures
+### Finish: Closures
 ```
 fn outer() {
     let x = 1;
@@ -123,7 +147,6 @@ let foo = fn (a, b) {
 print(foo(1, 2)); # prints 3
 ```
 ---
-
 ### List
 ```
 let l1 = [];         # empty list
@@ -135,7 +158,6 @@ l2[0] = 2;           # set Value at index
 print(l2);
 ```
 ---
-
 ### Map
 ```
 let m1 = {};         # empty Map
@@ -155,7 +177,15 @@ print(m1);
 print(m2);
 ```
 ---
-
+### Finish: Enums
+```
+enum Color {
+    RED,
+    GREEN,
+    BLUE
+}
+```
+---
 ### TODO Class
 ```
 class Animal {
@@ -233,6 +263,11 @@ exit(1);            # Set i32 exit code
 
 # print to stdout
 print("Hello World");
+
+TODO: Type Casting
+Int()
+Float()
+String()
 
 # read user input from stdin
 let awnser = input("How's your day? ");

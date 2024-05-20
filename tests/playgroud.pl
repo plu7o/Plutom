@@ -1,5 +1,9 @@
-let i = 1 * 1;
-
-print(++i); # 2
-print(i++); # 2
-print(i);   # 3
+let q = input("How is the wether?: ");
+match q: {
+    "Sunny" => {
+        print("Noice..");
+	print(":)");
+    },
+    "Rainy" => print(":(");,
+    _ => print(":/");
+}

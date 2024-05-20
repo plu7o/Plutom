@@ -8,7 +8,7 @@ use crate::{
     objects::object::{ObjClosure, ObjString, ObjType},
     stdlib::natives,
     value::Value,
-    DEBUG_TRACE_EXECUTION,
+    DEBUG_PRINT_STACK, DEBUG_TRACE_EXECUTION,
 };
 use core::{fmt, str};
 use std::{cell::RefCell, char, collections::HashMap, fmt::Debug, rc::Rc, usize};
@@ -163,6 +163,20 @@ impl VM {
                     (ObjType::Float(a), ObjType::Int(b)) => {
                         num_ops!(Value::float, a.clone(), b.clone(), $op);
                     }
+                    (ObjType::Bool(a), ObjType::Bool(b)) => match $op {
+                        BinaryOps::EQ => {
+                            self.pop();
+                            self.pop();
+                            self.push(Value::bool(a.clone() == b.clone()));
+                        }
+                        _ => {
+                            self.runtime_error(&format!(
+                                "Operation not supported on Bool -> {} {} {}.",
+                                left, $op, right
+                            ));
+                            return InterpretResult::RuntimeErr("BinaryOpError");
+                        }
+                    },
                     (ObjType::Str(a), ObjType::Str(b)) => match $op {
                         BinaryOps::ADD => {
                             self.pop();
@@ -268,6 +282,9 @@ impl VM {
         }
 
         loop {
+            if DEBUG_PRINT_STACK {
+                println!("{:#?}", self.stack);
+            }
             if DEBUG_TRACE_EXECUTION {
                 for slot in self.stack.iter() {
                     print!("[ ");
@@ -286,15 +303,19 @@ impl VM {
                 OpCode::GREATER => binary_op!(BinaryOps::GT),
                 OpCode::LESS => binary_op!(BinaryOps::LT),
                 OpCode::EQUAL => binary_op!(BinaryOps::EQ),
-                OpCode::NONE => self.push(Value::none()),
-                OpCode::TRUE => self.push(Value::bool(true)),
-                OpCode::FALSE => self.push(Value::bool(false)),
                 OpCode::Inc => pre_op!(+),
                 OpCode::Dec => pre_op!(-),
                 OpCode::PreInc => pre_op!(+),
                 OpCode::PreDec => pre_op!(-),
                 OpCode::PostInc => post_op!(+),
                 OpCode::PostDec => post_op!(-),
+                OpCode::NONE => self.push(Value::none()),
+                OpCode::TRUE => self.push(Value::bool(true)),
+                OpCode::FALSE => self.push(Value::bool(false)),
+                OpCode::Dup => {
+                    let value = self.peek(0);
+                    self.push_pointer(value.clone());
+                }
                 OpCode::DefineGlobal => {
                     let name = read_const!();
                     let name = name.as_string();
@@ -564,6 +585,13 @@ impl VM {
                         }
                     }
                 }
+                OpCode::Enum => {
+                    let count = read_const!();
+                    for _ in 0..count.as_int().value {
+                        println!("{:#?}", self.pop());
+                    }
+                    self.push(Value::none());
+                }
             }
         }
     }
@@ -694,7 +722,7 @@ impl VM {
         for i in (0..self.frame_count).rev() {
             let frame = &self.frames[i];
             let function = &frame.closure.function;
-            let instruction = frame.ip;
+            let instruction = frame.ip - self.stack.len() - 1;
             let location = function.chunk.get_location(instruction);
             if let Some(name) = &function.name {
                 error::report_error(&self.source, &format!("in {}()", name.value), location);

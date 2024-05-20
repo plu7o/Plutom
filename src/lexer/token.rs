@@ -63,6 +63,7 @@ pub enum TokenType {
     Super,
     This,
     Match,
+    Enum,
 
     Err,
     Eof,
