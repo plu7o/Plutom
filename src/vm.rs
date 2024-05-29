@@ -5,11 +5,7 @@ use crate::{
     },
     debug::disassemble_instruction,
     error,
-    objects::{
-        closures::ObjClosure,
-        object::{ObjString, ObjType},
-        upvalue::ObjUpValue,
-    },
+    objects::{closures::ObjClosure, object::ObjType, string::ObjString, upvalue::ObjUpValue},
     stdlib::natives,
     value::Value,
     DEBUG_PRINT_STACK, DEBUG_TRACE_EXECUTION,

@@ -2,11 +2,16 @@ use core::fmt;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::objects::{
+    bool::ObjBool,
     closures::ObjClosure,
+    float::ObjFloat,
     functions::ObjFunction,
+    integer::ObjInt,
     list::ObjList,
     map::ObjMap,
-    object::{NativeFn, ObjBool, ObjFloat, ObjInt, ObjNative, ObjString, ObjType},
+    native::{NativeFn, ObjNative},
+    object::ObjType,
+    string::ObjString,
     upvalue::ObjUpValue,
 };
 
@@ -232,6 +237,7 @@ impl Value {
                 ObjType::List(list) => list.print(),
                 ObjType::Map(map) => map.print(),
                 ObjType::UpValue(upvalue) => upvalue.print(),
+                ObjType::None(_) => print!("none"),
             },
             ValueType::None => print!("none"),
         }
@@ -270,6 +276,7 @@ impl fmt::Display for Value {
                     write!(f, "{}", format)
                 }
                 ObjType::UpValue(upvalue) => write!(f, "{:#?}", upvalue),
+                ObjType::None(_) => write!(f, "None"),
             },
             ValueType::None => write!(f, "None"),
         }

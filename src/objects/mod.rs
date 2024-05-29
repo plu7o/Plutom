@@ -1,6 +1,12 @@
+pub mod bool;
 pub mod closures;
+pub mod float;
 pub mod functions;
+pub mod integer;
 pub mod list;
 pub mod map;
+pub mod native;
+pub mod none;
 pub mod object;
+pub mod string;
 pub mod upvalue;

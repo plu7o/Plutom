@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::compiler::chunk::Chunk;
 
-use super::object::{ObjString, ObjType};
+use super::{object::ObjType, string::ObjString};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ObjFunction {

@@ -6,14 +6,14 @@ use crate::{
         lexer::Lexer,
         token::{Token, TokenType},
     },
-    objects::{functions::ObjFunction, object::ObjString},
+    objects::{functions::ObjFunction, string::ObjString},
     value::Value,
     DEBUG_DUMP_CODE,
 };
 
 use super::{
     chunk::OpCode,
-    compiler::{self, Compiler, FunctionType, Local},
+    compiler::{Compiler, FunctionType, Local},
 };
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
