@@ -5,12 +5,16 @@ use crate::{
     },
     debug::disassemble_instruction,
     error,
-    objects::object::{ObjClosure, ObjString, ObjType},
+    objects::{
+        closures::ObjClosure,
+        object::{ObjString, ObjType},
+        upvalue::ObjUpValue,
+    },
     stdlib::natives,
     value::Value,
     DEBUG_PRINT_STACK, DEBUG_TRACE_EXECUTION,
 };
-use core::{fmt, str};
+use core::fmt;
 use std::{cell::RefCell, char, collections::HashMap, fmt::Debug, rc::Rc, usize};
 
 enum BinaryOps {
@@ -45,9 +49,10 @@ pub enum InterpretResult<T, E> {
 
 #[derive(Debug, Clone)]
 struct CallFrame {
-    closure: ObjClosure,
+    closure: Rc<RefCell<ObjClosure>>,
     ip: usize,
-    slots: Vec<Rc<RefCell<Value>>>,
+    slots_offset: usize,
+    slots_len: usize,
 }
 
 pub struct VM {
@@ -56,6 +61,7 @@ pub struct VM {
     stack: Vec<Rc<RefCell<Value>>>,
     stack_top: usize,
     globals: HashMap<ObjString, Rc<RefCell<Value>>>,
+    open_upvalues: Vec<ObjUpValue>,
     source: String,
 }
 
@@ -63,11 +69,12 @@ impl VM {
     pub fn new() -> Self {
         Self {
             frames: Vec::new(),
-            frame_count: 0,
             stack: Vec::new(),
-            stack_top: 0,
+            open_upvalues: Vec::new(),
             globals: HashMap::new(),
             source: String::new(),
+            frame_count: 0,
+            stack_top: 0,
         }
     }
 
@@ -93,20 +100,20 @@ impl VM {
         };
 
         self.source = source;
-        self.push(Value::function(function.clone()));
+        self.push(Value::function(function.to_owned()));
         let closure = ObjClosure::new(function);
         self.pop();
-        self.push(Value::closure(closure.clone()));
-        self.call(&closure, 0);
+        self.push(Value::closure(closure.to_owned()));
+        self.call(closure, 0);
         self.run()
     }
 
     fn run(&mut self) -> InterpretResult<(), &str> {
-        let mut frame = self.frames[self.frame_count - 1].to_owned();
+        let mut frame = self.frames[self.frames.len() - 1].to_owned();
 
         macro_rules! read_byte {
             () => {{
-                let byte = frame.closure.function.chunk.code[frame.ip];
+                let byte = frame.closure.as_ref().borrow().function.chunk.code[frame.ip];
                 frame.ip += 1;
                 byte
             }};
@@ -115,14 +122,21 @@ impl VM {
         macro_rules! read_short {
             () => {{
                 frame.ip += 2;
-                let offset = (frame.closure.function.chunk.code[frame.ip - 2] << 8) as u16;
-                offset | frame.closure.function.chunk.code[frame.ip - 1] as u16
+                let offset =
+                    (frame.closure.as_ref().borrow().function.chunk.code[frame.ip - 2] << 8) as u16;
+                offset | frame.closure.as_ref().borrow().function.chunk.code[frame.ip - 1] as u16
             }};
         }
 
         macro_rules! read_const {
             () => {{
-                frame.closure.function.chunk.constants[read_byte!()].clone()
+                &frame.closure.as_ref().borrow().function.chunk.constants[read_byte!()]
+            }};
+        }
+
+        macro_rules! access_frame_slot {
+            ($slot_index:expr) => {{
+                self.stack[frame.slots_offset + $slot_index].clone()
             }};
         }
 
@@ -292,7 +306,7 @@ impl VM {
                     print!(" ]");
                 }
                 println!();
-                disassemble_instruction(&frame.closure.function.chunk, frame.ip);
+                disassemble_instruction(&frame.closure.as_ref().borrow().function.chunk, frame.ip);
             }
             let instruction = read_byte!();
             match OpCode::from(instruction) {
@@ -342,11 +356,32 @@ impl VM {
                 }
                 OpCode::LoadLocal => {
                     let slot = read_byte!();
-                    self.push_pointer(frame.slots[slot].clone());
+                    self.push_pointer(access_frame_slot!(slot));
                 }
                 OpCode::SetLocal => {
                     let slot = read_byte!();
-                    frame.slots[slot] = self.peek(0).clone();
+                    self.stack[frame.slots_offset + slot] = self.peek(0);
+                }
+                OpCode::LoadUpValue => {
+                    let slot = read_byte!();
+                    self.push_pointer(
+                        frame.closure.as_ref().borrow().upvalues[slot]
+                            .as_ref()
+                            .borrow()
+                            .location
+                            .clone(),
+                    );
+                }
+                OpCode::SetUpValue => {
+                    let slot = read_byte!();
+                    frame.closure.as_ref().borrow_mut().upvalues[slot]
+                        .as_ref()
+                        .borrow_mut()
+                        .location = self.peek(0);
+                }
+                OpCode::CloseUpValue => {
+                    self.close_upvalues(self.stack_top - 1);
+                    self.pop();
                 }
                 OpCode::Loop => {
                     let offset = read_short!();
@@ -377,7 +412,7 @@ impl VM {
                     ));
                 }
                 OpCode::CONST => {
-                    let constant: Value = read_const!();
+                    let constant: Value = read_const!().clone();
                     self.push(constant);
                 }
                 OpCode::NEGATE => match self.pop().as_ref().borrow().as_object() {
@@ -402,31 +437,46 @@ impl VM {
                 }
                 OpCode::Call => {
                     let arg_count = read_byte!();
-                    self.frames[self.frame_count - 1] = frame.to_owned();
+                    self.frames[self.frame_count - 1] = frame.clone();
                     if !self.call_value(&self.peek(arg_count).as_ref().borrow(), arg_count) {
                         return InterpretResult::RuntimeErr("CallError");
                     }
                     frame = self.frames[self.frame_count - 1].to_owned();
                 }
                 OpCode::RETURN => {
-                    self.frames[self.frame_count - 1] = frame.to_owned();
                     let result = self.pop();
-                    self.frame_count -= 1;
+                    self.close_upvalues(frame.slots_offset);
                     self.frames.pop();
+                    self.frame_count -= 1;
+
                     if self.frame_count == 0 {
                         self.pop();
                         return InterpretResult::Ok(());
                     }
 
-                    self.stack_top -= frame.slots.len();
-                    self.stack
-                        .resize(self.stack_top, Rc::new(RefCell::new(Value::none())));
+                    self.stack_top -= frame.slots_len;
+                    self.stack.truncate(self.stack_top);
                     self.push_pointer(result);
                     frame = self.frames[self.frame_count - 1].to_owned();
                 }
                 OpCode::Closure => {
                     let function = read_const!();
-                    let closure = ObjClosure::new(function.as_function().clone());
+                    let mut closure = ObjClosure::new(function.as_function().clone());
+
+                    for _ in 0..closure.upvalue_count {
+                        let is_local = read_byte!();
+                        let index = read_byte!();
+
+                        if is_local == 1 {
+                            let v = access_frame_slot!(index);
+                            closure.upvalues.push(self.capture_upvalue(&v, index));
+                        } else {
+                            closure
+                                .upvalues
+                                .push(frame.closure.as_ref().borrow().upvalues[index].clone());
+                        }
+                    }
+
                     self.push(Value::closure(closure));
                 }
                 OpCode::List => {
@@ -598,16 +648,15 @@ impl VM {
 
     fn call_value(&mut self, callee: &Value, arg_count: usize) -> bool {
         match callee.as_object() {
-            ObjType::Closure(closure) => return self.call(closure, arg_count),
+            ObjType::Closure(closure) => return self.call(closure.clone(), arg_count),
             ObjType::Native(native) => {
                 let result =
                     (native.function)(arg_count, &self.stack[self.stack_top - arg_count..]);
 
                 match result {
                     Ok(value) => {
-                        self.stack_top = self.stack_top - (arg_count + 1);
-                        self.stack
-                            .resize(self.stack_top, Rc::new(RefCell::new(Value::none())));
+                        self.stack_top = self.stack.len() - (arg_count + 1);
+                        self.stack.truncate(self.stack_top);
                         self.push(value);
                         return true;
                     }
@@ -627,7 +676,45 @@ impl VM {
         }
     }
 
-    fn call(&mut self, closure: &ObjClosure, arg_count: usize) -> bool {
+    fn capture_upvalue(
+        &mut self,
+        local: &Rc<RefCell<Value>>,
+        index: usize,
+    ) -> Rc<RefCell<ObjUpValue>> {
+        let created_upvalue = ObjUpValue::new(local.clone());
+
+        for (i, upvalue) in self.open_upvalues.iter().enumerate().rev() {
+            if upvalue.location == *local && index == i {
+                return Rc::new(RefCell::new(upvalue.clone()));
+            }
+
+            if upvalue.location == *local && i < index {
+                self.open_upvalues.insert(i, created_upvalue.clone());
+                return Rc::new(RefCell::new(created_upvalue));
+            }
+        }
+
+        if self.open_upvalues.is_empty() {
+            self.open_upvalues.push(created_upvalue.clone());
+        }
+
+        Rc::new(RefCell::new(created_upvalue))
+    }
+
+    fn close_upvalues(&mut self, index: usize) {
+        for (i, upvalue) in self.open_upvalues.iter_mut().enumerate().rev() {
+            if i >= index {
+                upvalue.closed = Some(upvalue.location.clone());
+                upvalue.location = upvalue.closed.clone().unwrap();
+            }
+
+            if i < index {
+                break;
+            }
+        }
+    }
+
+    fn call(&mut self, closure: ObjClosure, arg_count: usize) -> bool {
         if arg_count != closure.function.arity {
             self.runtime_error(&format!(
                 "Expected {} arguments but got {}",
@@ -636,16 +723,14 @@ impl VM {
             return false;
         }
 
-        if self.frame_count == usize::MAX {
-            self.runtime_error("Stack overflow.");
-            return false;
-        }
-
+        let offset = self.stack_top - arg_count - 1;
         let frame = CallFrame {
-            closure: closure.clone(),
+            closure: Rc::new(RefCell::new(closure)),
             ip: 0,
-            slots: self.stack[self.stack_top - arg_count - 1..].to_vec(),
+            slots_offset: offset,
+            slots_len: arg_count,
         };
+
         self.frames.push(frame);
         self.frame_count += 1;
         true
@@ -717,11 +802,17 @@ impl VM {
     fn runtime_error(&mut self, format: &str) {
         let frame = &self.frames[self.frame_count - 1];
         let instruction = frame.ip;
-        let location = frame.closure.function.chunk.get_location(instruction);
+        let location = frame
+            .closure
+            .as_ref()
+            .borrow()
+            .function
+            .chunk
+            .get_location(instruction);
         error::report_error(&self.source, format, location);
         for i in (0..self.frame_count).rev() {
             let frame = &self.frames[i];
-            let function = &frame.closure.function;
+            let function = &frame.closure.as_ref().borrow().function;
             let instruction = frame.ip - self.stack.len() - 1;
             let location = function.chunk.get_location(instruction);
             if let Some(name) = &function.name {

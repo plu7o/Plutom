@@ -1,4 +1,4 @@
-use crate::{compiler::chunk::Chunk, value::Value};
+use crate::value::Value;
 use core::fmt;
 use std::{
     cell::RefCell,
@@ -8,7 +8,9 @@ use std::{
     rc::Rc,
 };
 
-use super::{list::ObjList, map::ObjMap};
+use super::{
+    closures::ObjClosure, functions::ObjFunction, list::ObjList, map::ObjMap, upvalue::ObjUpValue,
+};
 
 pub type NativeFn = fn(usize, &[Rc<RefCell<Value>>]) -> Result<Value, String>;
 
@@ -24,7 +26,7 @@ impl Hash for Float {
 }
 impl Eq for Float {}
 
-#[derive(Debug, Clone, Eq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum ObjType {
     Bool(ObjBool),
     Int(ObjInt),
@@ -35,27 +37,12 @@ pub enum ObjType {
     Closure(ObjClosure),
     List(ObjList),
     Map(ObjMap),
+    UpValue(ObjUpValue),
 }
 
 impl fmt::Display for ObjType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:#?}", self)
-    }
-}
-
-impl PartialEq for ObjType {
-    fn eq(&self, other: &Self) -> bool {
-        match self {
-            ObjType::Bool(bool) => bool == other,
-            ObjType::Str(string) => string == other,
-            ObjType::Int(integer) => integer == other,
-            ObjType::Float(float) => float == other,
-            ObjType::Function(function) => function == other,
-            ObjType::Closure(closure) => closure == other,
-            ObjType::Native(native) => native == other,
-            ObjType::List(list) => list == other,
-            ObjType::Map(map) => map == other,
-        }
     }
 }
 
@@ -118,57 +105,6 @@ impl PartialOrd<ObjType> for ObjString {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ObjFunction {
-    pub arity: usize,
-    pub chunk: Chunk,
-    pub name: Option<ObjString>,
-}
-
-impl ObjFunction {
-    pub fn new() -> Self {
-        Self {
-            arity: 0,
-            name: None,
-            chunk: Chunk::init(),
-        }
-    }
-
-    pub fn print(&self) {
-        match &self.name {
-            Some(name) => print!("<fn {}>", name.value),
-            None => print!("<Script>"),
-        }
-    }
-}
-
-impl fmt::Display for ObjFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.name {
-            Some(name) => write!(f, "<fn {}>", name.value),
-            None => write!(f, "<Script>"),
-        }
-    }
-}
-
-impl PartialEq<ObjType> for ObjFunction {
-    fn eq(&self, other: &ObjType) -> bool {
-        match other {
-            ObjType::Function(function) => match &function.name {
-                Some(name) => {
-                    if let Some(self_name) = &self.name {
-                        name.value == self_name.value
-                    } else {
-                        false
-                    }
-                }
-                None => self.name.is_none(),
-            },
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ObjNative {
     pub function: NativeFn,
 }
@@ -187,30 +123,6 @@ impl PartialEq<ObjType> for ObjNative {
     fn eq(&self, other: &ObjType) -> bool {
         match other {
             ObjType::Native(native) => native.function == self.function,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ObjClosure {
-    pub function: ObjFunction,
-}
-
-impl ObjClosure {
-    pub fn new(function: ObjFunction) -> Self {
-        Self { function }
-    }
-
-    pub fn print(&self) {
-        print!("<Closure>");
-    }
-}
-
-impl PartialEq<ObjType> for ObjClosure {
-    fn eq(&self, other: &ObjType) -> bool {
-        match other {
-            ObjType::Closure(closure) => closure.function == self.function,
             _ => false,
         }
     }

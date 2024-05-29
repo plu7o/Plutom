@@ -124,7 +124,7 @@ fn foo(bar, baz) {
 foo(1, 3);
 ```
 ---
-### Finish: Closures
+### Closures
 ```
 fn outer() {
     let x = 1;
@@ -135,7 +135,7 @@ fn outer() {
 }
 
 let foo = outer();
-foo();
+foo(); // prints '1'
 ```
 ---
 ### TODO Anonymous Function

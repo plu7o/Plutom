@@ -1,12 +1,13 @@
 use core::fmt;
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::objects::{
+    closures::ObjClosure,
+    functions::ObjFunction,
     list::ObjList,
     map::ObjMap,
-    object::{
-        NativeFn, ObjBool, ObjClosure, ObjFloat, ObjFunction, ObjInt, ObjNative, ObjString, ObjType,
-    },
+    object::{NativeFn, ObjBool, ObjFloat, ObjInt, ObjNative, ObjString, ObjType},
+    upvalue::ObjUpValue,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -94,6 +95,10 @@ impl Value {
         Value::object(ObjType::Map(ObjMap::new(dict)))
     }
 
+    pub fn upvalue(loccation: Rc<RefCell<Value>>) -> Value {
+        Value::object(ObjType::UpValue(ObjUpValue::new(loccation)))
+    }
+
     pub fn as_none(&self) -> &ValueType {
         match &self._type {
             ValueType::None => &self._type,
@@ -152,6 +157,10 @@ impl Value {
         as_type!(&self._type, ObjType::Map, "Expected ObjList")
     }
 
+    pub fn as_upvalue(&self) -> &ObjUpValue {
+        as_type!(&self._type, ObjType::UpValue, "Expected ObjUpValue")
+    }
+
     pub fn is_none(&self) -> bool {
         match self._type {
             ValueType::None => true,
@@ -206,6 +215,10 @@ impl Value {
         is_type!(&self._type, ObjType::Map)
     }
 
+    pub fn is_upvalue(&self) -> bool {
+        is_type!(&self._type, ObjType::UpValue)
+    }
+
     pub fn print(&self) {
         match &self._type {
             ValueType::Object(object) => match object {
@@ -218,6 +231,7 @@ impl Value {
                 ObjType::Closure(closure) => closure.print(),
                 ObjType::List(list) => list.print(),
                 ObjType::Map(map) => map.print(),
+                ObjType::UpValue(upvalue) => upvalue.print(),
             },
             ValueType::None => print!("none"),
         }
@@ -234,7 +248,7 @@ impl fmt::Display for Value {
                 ObjType::Str(string) => write!(f, "String('{}')", string.value),
                 ObjType::Function(func) => write!(f, "{}", func),
                 ObjType::Native(_) => write!(f, "<NativeFn>"),
-                ObjType::Closure(_) => write!(f, "<Closure>"),
+                ObjType::Closure(closure) => write!(f, "<Closure{}>", closure.function),
                 ObjType::List(list) => {
                     let mut format = "List[".to_string();
                     for (i, item) in list.items.iter().enumerate() {
@@ -255,6 +269,7 @@ impl fmt::Display for Value {
                     format.push_str("}");
                     write!(f, "{}", format)
                 }
+                ObjType::UpValue(upvalue) => write!(f, "{:#?}", upvalue),
             },
             ValueType::None => write!(f, "None"),
         }

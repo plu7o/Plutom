@@ -1,26 +1,24 @@
-use std::isize;
-
 use crate::compiler::chunk::{Chunk, OpCode};
 
 #[allow(dead_code)]
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
-    let spacer = "-".repeat(10);
-    println!("{spacer} [ {} ] {spacer}", name);
-    // (1..chunk.code.len()).fold(0, |offset, _| disassemble_instruction(chunk, offset));
+    let spacer = "-".repeat(20);
     let mut offset = 0;
+
+    println!("| {spacer} [ {:^10} ] {spacer} |", name);
     while offset < chunk.code.len() {
         offset = disassemble_instruction(chunk, offset);
     }
-    println!("{spacer} END {spacer}");
+    println!("| {spacer} [ {:^10} ] {spacer} |", "END");
 }
 
 pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
     print!("[{:04}] -> ", offset);
 
     if offset > 0 && chunk.get_location(offset).row == chunk.get_location(offset - 1).row {
-        print!("{:1}| ", "");
+        print!("{:3}| ", "");
     } else {
-        print!("{:2} ", chunk.get_location(offset).row);
+        print!("{:4} ", chunk.get_location(offset).row);
     }
 
     let instruction = chunk.code[offset];
@@ -29,11 +27,14 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
         OpCode::DefineGlobal => constant_op(instruction, &chunk, offset),
         OpCode::LoadGlobal => constant_op(instruction, &chunk, offset),
         OpCode::SetGlobal => constant_op(instruction, &chunk, offset),
-        OpCode::LoadLocal => constant_op(instruction, &chunk, offset),
-        OpCode::SetLocal => constant_op(instruction, &chunk, offset),
+        OpCode::LoadLocal => byte_op(instruction, &chunk, offset),
+        OpCode::SetLocal => byte_op(instruction, &chunk, offset),
+        OpCode::LoadUpValue => byte_op(instruction, &chunk, offset),
+        OpCode::SetUpValue => byte_op(instruction, &chunk, offset),
+        OpCode::CloseUpValue => byte_op(instruction, &chunk, offset),
         OpCode::List => constant_op(instruction, &chunk, offset),
         OpCode::Map => constant_op(instruction, &chunk, offset),
-        OpCode::Call => constant_op(instruction, &chunk, offset),
+        OpCode::Call => byte_op(instruction, &chunk, offset),
         OpCode::Enum => constant_op(instruction, &chunk, offset),
         OpCode::RETURN => simple_op(instruction, offset),
         OpCode::GetIndex => simple_op(instruction, offset),
@@ -69,12 +70,23 @@ pub fn disassemble_instruction(chunk: &Chunk, offset: usize) -> usize {
             let constant = chunk.code[offset];
             offset += 1;
             print!(
-                "{:15} {:4} ",
+                "{:14} {:4} ",
                 format!("{}", OpCode::from(instruction)),
                 constant
             );
             print!("{}", chunk.constants[constant]);
             println!();
+
+            let function = chunk.constants[constant].as_function();
+            for _ in 0..function.upvalue_count {
+                let is_local = chunk.code[offset];
+                offset += 1;
+
+                let index = chunk.code[offset];
+                offset += 1;
+                let msg = if is_local == 1 { "local" } else { "upvalue" };
+                println!("[{:04}] -> {:3}| {:>16} [{}]", offset - 2, " ", msg, index);
+            }
             offset
         }
     }
@@ -95,6 +107,12 @@ fn jump_op(instruction: usize, sign: isize, chunk: &Chunk, offset: usize) -> usi
         offset as isize + 3 + sign * jump as isize
     );
     offset + 3
+}
+
+fn byte_op(instruction: usize, chunk: &Chunk, offset: usize) -> usize {
+    let slot = chunk.code[offset + 1];
+    println!("{:16} [{}]", format!("{}", OpCode::from(instruction)), slot);
+    offset + 2
 }
 
 fn constant_op(instruction: usize, chunk: &Chunk, offset: usize) -> usize {

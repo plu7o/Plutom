@@ -1,18 +1,19 @@
 use crate::{
+    compiler::compiler::UpValue,
     debug::disassemble_chunk,
     error,
     lexer::{
         lexer::Lexer,
         token::{Token, TokenType},
     },
-    objects::object::{ObjFunction, ObjString},
+    objects::{functions::ObjFunction, object::ObjString},
     value::Value,
     DEBUG_DUMP_CODE,
 };
 
 use super::{
     chunk::OpCode,
-    compiler::{Compiler, FunctionType, Local},
+    compiler::{self, Compiler, FunctionType, Local},
 };
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -288,31 +289,6 @@ impl<'a> Parser<'a> {
         self.named_variable(&_previous, can_assign);
     }
 
-    fn named_variable(&mut self, name: &Token, can_assign: bool) {
-        let get_op: OpCode;
-        let set_op: OpCode;
-
-        let arg = match self.resolve_local(&name) {
-            Some(arg) => {
-                get_op = OpCode::LoadLocal;
-                set_op = OpCode::SetLocal;
-                arg
-            }
-            None => {
-                get_op = OpCode::LoadGlobal;
-                set_op = OpCode::SetGlobal;
-                self.make_ident_const(&name)
-            }
-        };
-
-        if can_assign && self.match_token(TokenType::Eq) {
-            self.expression();
-            self.emit_bytes(set_op as usize, arg);
-        } else {
-            self.emit_bytes(get_op as usize, arg);
-        }
-    }
-
     fn declare_var(&mut self) -> Result<(), String> {
         if self.compiler.scope_depth == 0 {
             return Ok(());
@@ -322,7 +298,7 @@ impl<'a> Parser<'a> {
             if local.depth != -1 && local.depth < self.compiler.scope_depth {
                 break;
             }
-            if self.identifiers_equal(name, &local.name) {
+            if Parser::identifiers_equal(name, &local.name) {
                 return Err("Already a variable with this name in this scope".to_string());
             }
         }
@@ -338,18 +314,49 @@ impl<'a> Parser<'a> {
         self.emit_bytes(OpCode::DefineGlobal as usize, global);
     }
 
+    fn named_variable(&mut self, name: &Token, can_assign: bool) {
+        let get_op: OpCode;
+        let set_op: OpCode;
+        let mut compiler = self.compiler.clone();
+        let local = self.resolve_local(compiler.as_ref(), name);
+        let upvalue = self.resolve_upvalue(compiler.as_mut(), name);
+        self.compiler = compiler;
+
+        let arg = if local.is_some() {
+            get_op = OpCode::LoadLocal;
+            set_op = OpCode::SetLocal;
+            local.unwrap()
+        } else if upvalue.is_some() {
+            get_op = OpCode::LoadUpValue;
+            set_op = OpCode::SetUpValue;
+            upvalue.unwrap()
+        } else {
+            get_op = OpCode::LoadGlobal;
+            set_op = OpCode::SetGlobal;
+            self.make_ident_const(&name)
+        };
+
+        if can_assign && self.match_token(TokenType::Eq) {
+            self.expression();
+            self.emit_bytes(set_op as usize, arg);
+        } else {
+            self.emit_bytes(get_op as usize, arg);
+        }
+    }
+
     fn add_local(&mut self, name: Token<'a>) {
         if self.compiler.local_count == usize::MAX {
             self.error("Too many local variables in function.".to_string());
             return;
         }
-        self.compiler.locals.push(Local { name, depth: -1 });
+
+        self.compiler.locals.push(Local::new(name, -1, false));
         self.compiler.local_count += 1;
     }
 
-    fn resolve_local(&mut self, name: &Token) -> Option<usize> {
-        for (i, local) in self.compiler.locals.iter().enumerate().rev() {
-            if self.identifiers_equal(name, &local.name) {
+    fn resolve_local(&mut self, compiler: &Compiler<'a>, name: &Token) -> Option<usize> {
+        for (i, local) in compiler.locals.iter().enumerate().rev() {
+            if Parser::identifiers_equal(name, &local.name) {
                 if local.depth == -1 {
                     self.error("Can't read local variable in its own initializer".to_string());
                 }
@@ -359,6 +366,38 @@ impl<'a> Parser<'a> {
         None
     }
 
+    fn resolve_upvalue(&mut self, compiler: &mut Compiler<'a>, name: &Token) -> Option<usize> {
+        let enclosing = compiler.enclosing.as_mut()?;
+
+        if let Some(local) = self.resolve_local(enclosing, name) {
+            enclosing.locals[local].is_captured = true;
+            return Some(self.add_upvalue(compiler, local, true));
+        }
+
+        if let Some(upvalue) = self.resolve_upvalue(enclosing, name) {
+            return Some(self.add_upvalue(compiler, upvalue, false));
+        }
+        None
+    }
+
+    fn add_upvalue(&mut self, compiler: &mut Compiler<'a>, index: usize, is_local: bool) -> usize {
+        let upvalue_count = compiler.function.upvalue_count;
+
+        for (i, upvalue) in compiler.upvalues[..upvalue_count].iter().enumerate() {
+            if upvalue.index == index && upvalue.is_local == is_local {
+                return i;
+            }
+        }
+
+        compiler
+            .upvalues
+            .insert(upvalue_count, UpValue { index, is_local });
+
+        let count = compiler.function.upvalue_count;
+        compiler.function.upvalue_count += 1;
+        count
+    }
+
     fn mark_initialized(&mut self) {
         if self.compiler.scope_depth == 0 {
             return;
@@ -366,7 +405,7 @@ impl<'a> Parser<'a> {
         self.compiler.locals[self.compiler.local_count - 1].depth = self.compiler.scope_depth;
     }
 
-    fn identifiers_equal(&self, a: &Token, b: &Token) -> bool {
+    fn identifiers_equal(a: &Token, b: &Token) -> bool {
         if a.literal.len() != b.literal.len() {
             return false;
         }
@@ -424,8 +463,8 @@ impl<'a> Parser<'a> {
     }
 
     fn function(&mut self, func_type: FunctionType) {
-        let enclosing = &mut self.compiler;
-        self.compiler = Box::new(Compiler::init(Some(enclosing.clone()), func_type.clone()));
+        let enclosing = self.compiler.clone();
+        self.compiler = Box::new(Compiler::init(Some(enclosing), func_type.clone()));
 
         match func_type {
             FunctionType::Script => (),
@@ -456,10 +495,20 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::LeftBrace, "Expect '{' before funtion body");
         self.block();
 
+        let current_compiler = self.compiler.clone();
         let function = self.end_compiler();
-
-        let value = self.make_const(Value::function(function));
+        let value = self.make_const(Value::function(function.clone()));
         self.emit_bytes(OpCode::Closure as usize, value);
+
+        for i in 0..function.upvalue_count {
+            let is_local = if current_compiler.upvalues[i].is_local {
+                1
+            } else {
+                0
+            };
+            self.emit_byte(is_local);
+            self.emit_byte(current_compiler.upvalues[i].index);
+        }
     }
 
     fn call(&mut self, _can_assign: bool) {
@@ -872,7 +921,11 @@ impl<'a> Parser<'a> {
         while self.compiler.local_count > 0
             && self.compiler.locals[self.compiler.local_count - 1].depth > self.compiler.scope_depth
         {
-            self.emit_byte(OpCode::POP as usize);
+            if self.compiler.locals[self.compiler.local_count - 1].is_captured {
+                self.emit_byte(OpCode::CloseUpValue as usize);
+            } else {
+                self.emit_byte(OpCode::POP as usize);
+            }
             self.compiler.local_count -= 1;
             self.compiler.locals.pop();
         }
@@ -949,7 +1002,6 @@ impl<'a> Parser<'a> {
     pub fn end_compiler(&mut self) -> ObjFunction {
         self.emit_return();
         let function = self.compiler.function.clone();
-
         if DEBUG_DUMP_CODE {
             if !self.had_error {
                 let name = if let Some(name) = &function.name {
@@ -960,12 +1012,10 @@ impl<'a> Parser<'a> {
                 disassemble_chunk(&self.compiler.current_chunk(), name)
             }
         }
-
-        if self.compiler.enclosing.is_some() {
-            self.compiler = self.compiler.enclosing.clone().unwrap();
+        if let Some(enclosing) = &self.compiler.enclosing {
+            self.compiler = enclosing.clone();
         }
-
-        function.clone()
+        function
     }
 
     // -----------------------------------------------------------
@@ -997,7 +1047,6 @@ impl<'a> Parser<'a> {
 
     fn error_at_current(&mut self, msg: String) {
         let current = self.current;
-        println!("{:#?}", current);
         self.error_at(&current, &msg);
     }
 

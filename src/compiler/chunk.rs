@@ -44,6 +44,9 @@ pub enum OpCode {
     PostDec,
     Enum,
     Dup,
+    LoadUpValue,
+    SetUpValue,
+    CloseUpValue,
 }
 
 impl fmt::Display for OpCode {
@@ -88,6 +91,9 @@ impl fmt::Display for OpCode {
             OpCode::PostDec => write!(f, "POST_DEC"),
             OpCode::Enum => write!(f, "ENUM"),
             OpCode::Dup => write!(f, "DUP"),
+            OpCode::LoadUpValue => write!(f, "LOAD_UPVALUE"),
+            OpCode::SetUpValue => write!(f, "SET_UPVALUE"),
+            OpCode::CloseUpValue => write!(f, "CLOSE_UPVALUE"),
         }
     }
 }
@@ -140,6 +146,9 @@ impl From<usize> for OpCode {
             36 => OpCode::PostDec,
             37 => OpCode::Enum,
             38 => OpCode::Dup,
+            39 => OpCode::LoadUpValue,
+            40 => OpCode::SetUpValue,
+            41 => OpCode::CloseUpValue,
             _ => panic!("Unkown OpCode"),
         }
     }
